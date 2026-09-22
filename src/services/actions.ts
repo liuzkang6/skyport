@@ -11,6 +11,7 @@ import {
   type ActorRef,
 } from './agents';
 import { executeAction, insertEvent, getLastExecution, type Execution } from './action-exec';
+import { notifyPendingAction } from './notify';
 import { getAsset } from './assets';
 import {
   applyHint,
@@ -187,6 +188,8 @@ export async function createAction(input: CreateActionInput): Promise<ActionResu
   if (humanAuto || agentAuto) {
     return await approveAndExecute(action.id, input.actor, 'auto-approved');
   }
+  // 停在 pending 等人：发一条出站通知（未配置不发、失败不阻断——尽力而为）
+  await notifyPendingAction(action);
   return { action, execution: undefined };
 }
 
