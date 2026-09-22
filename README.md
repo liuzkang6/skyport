@@ -25,9 +25,11 @@ pnpm dev asset check web-01   # TCP 连通性检查
 | --- | --- |
 | `pnpm typecheck` | TypeScript 类型检查（tsc --noEmit，严格模式三开关全开） |
 | `pnpm lint` | oxlint 静态检查 |
+| `pnpm arch:check` | 架构门禁：services 禁直连 fs/child_process/env、adapters 禁反向依赖、exit 只在 CLI 入口（AGENTS §4 的机器强制） |
+| `pnpm arch:context <路径>` | 模块阅读包：文件/行数/依赖/反向依赖/违规清单（改不熟悉的模块前先看） |
 | `pnpm test` | vitest 单元测试 |
 | `pnpm build` | esbuild 打包单文件产物 `dist/cli/index.mjs`（bin 入口优先使用产物，启动 ~0.2s） |
-| `pnpm verify` | 组合门禁：typecheck + lint + test + build |
+| `pnpm verify` | 组合门禁：typecheck + lint + arch:check + test + build |
 | `pnpm coverage` | 测试覆盖率报告 |
 | `pnpm dev` | 以 tsx 直接运行 CLI（如 `pnpm dev doctor`） |
 

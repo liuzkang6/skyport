@@ -3,7 +3,7 @@
  * 业务代码禁止直接调 node:fs；需要文件能力时从本模块导入。
  * 所有底层异常统一归一化为 SKYPORT_FS_* / SKYPORT_PERMISSION_* 错误码再上抛。
  */
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import { createError, ERROR_CODES, type SkyportError } from '../errors/errors';
 
@@ -94,5 +94,57 @@ export function writeFileUtf8Sync(path: string, data: string): void {
     writeFileSync(path, data, 'utf8');
   } catch (error) {
     throw normalizeFsError(path, 'write', error);
+  }
+}
+
+/** 幂等建目录（backup/部署类服务用；mode 只在新建时生效） */
+export function ensureDir(path: string, mode?: number): void {
+  try {
+    const options: { recursive: true; mode?: number } = { recursive: true };
+    if (mode !== undefined) options.mode = mode;
+    mkdirSync(path, options);
+  } catch (error) {
+    throw normalizeFsError(path, 'write', error);
+  }
+}
+
+/** 显式收紧权限（调用方决定是否收紧——默认数据目录才收紧，见 S5 规矩） */
+export function setFileMode(path: string, mode: number): void {
+  try {
+    chmodSync(path, mode);
+  } catch (error) {
+    throw normalizeFsError(path, 'write', error);
+  }
+}
+
+export function fileSize(path: string): number {
+  try {
+    return statSync(path).size;
+  } catch (error) {
+    throw normalizeFsError(path, 'read', error);
+  }
+}
+
+export function listDir(path: string): string[] {
+  try {
+    return readdirSync(path);
+  } catch (error) {
+    throw normalizeFsError(path, 'read', error);
+  }
+}
+
+export function removePath(path: string): void {
+  try {
+    rmSync(path, { force: true });
+  } catch (error) {
+    throw normalizeFsError(path, 'write', error);
+  }
+}
+
+export function fileMtimeMs(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch (error) {
+    throw normalizeFsError(path, 'read', error);
   }
 }

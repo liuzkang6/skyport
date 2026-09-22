@@ -8,7 +8,7 @@
  * - 子进程异常/退出码统一归一化为 SKYPORT_EXEC_* / SKYPORT_PERMISSION_* 错误码后上抛
  */
 import { spawn, type SpawnOptions } from 'node:child_process';
-import { getConfig } from '../config/config';
+import { baseEnvironment, getConfig } from '../config/config';
 import { createError, ERROR_CODES, isSkyportError } from '../errors/errors';
 import { rootLogger } from '../logger/logger';
 
@@ -25,7 +25,7 @@ export interface ExecOptions {
   readonly retryOnTimeout?: boolean | undefined;
   /** 子进程工作目录 */
   readonly cwd?: string | undefined;
-  /** 在 process.env 基础上合并追加的环境变量（env 合并只发生在执行层这一处） */
+  /** 在 process.env 基础上合并追加的环境变量（env 读取统一走 config.baseEnvironment，AGENTS §4） */
   readonly env?: Readonly<Record<string, string>> | undefined;
 }
 
@@ -120,7 +120,7 @@ async function runOnce(command: string, args: readonly string[], options: RunOnc
   return new Promise<RunOnceResult>((resolve, reject) => {
     const spawnOptions: SpawnOptions = { shell: false, stdio: ['ignore', 'pipe', 'pipe'] };
     if (options.cwd !== undefined) spawnOptions.cwd = options.cwd;
-    if (options.env !== undefined) spawnOptions.env = { ...process.env, ...options.env };
+    if (options.env !== undefined) spawnOptions.env = { ...baseEnvironment(), ...options.env };
     const child = spawn(command, args, spawnOptions);
 
     const stdoutCollector = createOutputCollector(options.maxOutputBytes);

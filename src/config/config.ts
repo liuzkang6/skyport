@@ -139,3 +139,9 @@ export function getConfig(): SkyportConfig {
 export function resetConfigCache(): void {
   cachedConfig = undefined;
 }
+
+/** 子进程环境基座：executor 组装子进程 env 的唯一来源。
+ * 环境变量读取统一收敛在本模块（AGENTS §4），executor 不得直读 process.env。 */
+export function baseEnvironment(): NodeJS.ProcessEnv {
+  return process.env;
+}

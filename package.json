@@ -14,9 +14,11 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
+    "arch:check": "node scripts/check-architecture.mjs",
+    "arch:context": "node scripts/arch-context.mjs",
     "test": "vitest run",
     "build": "esbuild src/cli/index.ts --bundle --platform=node --format=esm --outfile=dist/cli/index.mjs --external:better-sqlite3 --banner:js='#!/usr/bin/env node'",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "verify": "pnpm typecheck && pnpm lint && pnpm arch:check && pnpm test && pnpm build",
     "coverage": "vitest run --coverage",
     "dev": "tsx src/cli/index.ts"
   },
