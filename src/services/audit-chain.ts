@@ -4,7 +4,6 @@
  */
 import { createHash } from 'node:crypto';
 import { getDb } from '../adapters/db';
-import { createError, ERROR_CODES } from '../errors/errors';
 
 /** 事件名枚举（TS 编译期约束，防拼写错——原来 insertEvent 第二参是裸字符串） */
 export const ACTION_EVENT_TYPES = [
