@@ -111,4 +111,20 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    up: (db) => {
+      // 审计链（红队 F2 + spec/audit-chain）：事件枚举约束在代码层，哈希链 + 全局序号在存储层
+      db.exec(`
+        ALTER TABLE action_events ADD COLUMN prev_hash TEXT;
+        ALTER TABLE action_events ADD COLUMN hash TEXT;
+        ALTER TABLE action_events ADD COLUMN seq INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_action_events_seq ON action_events(seq);
+        ALTER TABLE executions ADD COLUMN prev_hash TEXT;
+        ALTER TABLE executions ADD COLUMN hash TEXT;
+        ALTER TABLE executions ADD COLUMN seq INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_executions_seq ON executions(seq);
+      `);
+    },
+  },
 ];

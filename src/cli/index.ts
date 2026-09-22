@@ -16,6 +16,7 @@ import { formatLogEntry, rootLogger, type LogSink } from '../logger/logger';
 import { runDoctor } from '../services/doctor';
 import { defaultPolicyPath, loadPolicy } from '../services/risk';
 import { backupDatabase } from '../services/backup';
+import { verifyAuditChain } from '../services/audit-chain';
 import { buildAgentCommand } from './commands/agents';
 import { buildActionCommand, buildApprovalCommands } from './commands/actions';
 import { buildAssetCommand, configureListCommand } from './commands/assets';
@@ -147,6 +148,21 @@ function buildProgram(): Command {
       process.stdout.write(
         `已备份 ${result.path}（${result.bytes} 字节${result.pruned > 0 ? `，清理旧备份 ${result.pruned} 份` : ''}）\n`,
       );
+    });
+
+  program
+    .command('audit')
+    .description('审计操作')
+    .command('verify')
+    .description('校验审计链完整性（任何单条删改都会断链）')
+    .action(() => {
+      const result = verifyAuditChain();
+      if (result.ok) {
+        process.stdout.write(`审计链完整（${result.checked} 条记录校验通过）\n`);
+      } else {
+        process.stdout.write(`审计链断裂！${result.firstViolation?.table} seq=${result.firstViolation?.seq}：${result.firstViolation?.reason}\n`);
+        process.exitCode = 1;
+      }
     });
 
   // 裸 skyport list 即资产清单（spec 约定）
