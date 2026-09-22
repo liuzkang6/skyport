@@ -66,21 +66,27 @@ function formatSkyportError(error: SkyportError): string {
   if (Object.keys(error.context).length > 0) {
     lines.push(`  上下文: ${JSON.stringify(error.context)}`);
   }
-  let cause: unknown = error.cause;
-  for (let depth = 0; cause instanceof Error && depth < 5; depth += 1) {
-    lines.push(`  由 ${cause.name}: ${cause.message}`);
-    cause = cause.cause;
+  // 红队 S13：底层技术细节默认隐藏（SKYPORT_VERBOSE_ERRORS=true 打开排查）
+  if (verboseErrorsEnabled()) {
+    let cause: unknown = error.cause;
+    for (let depth = 0; cause instanceof Error && depth < 5; depth += 1) {
+      lines.push(`  技术细节: ${cause.name}: ${cause.message}`);
+      cause = cause.cause;
+    }
   }
   return lines.join('\n');
 }
 
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function verboseErrorsEnabled(): boolean {
+  try {
+    return getConfig().verboseErrors === true;
+  } catch {
+    return false; // 配置本身打不开时更不能让格式化层再炸
+  }
 }
 
-/** help/version 是"正常退出"而不是错误，不应记 ERROR 日志 */
-function isNormalCommanderExit(error: unknown): boolean {
-  return error instanceof CommanderError && COMMANDER_OK_CODES.has(error.code);
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function createFileSink(logFile: string): LogSink {
@@ -182,7 +188,8 @@ async function bootstrap(): Promise<number> {
 bootstrap()
   .then((exitCode) => process.exit(exitCode))
   .catch((error: unknown) => {
-    if (!isNormalCommanderExit(error)) {
+    // 红队 S15：commander 用法错误是人手滑不是故障，只留 commander 自己的输出，不记 ERROR
+    if (!(error instanceof CommanderError)) {
       rootLogger.error('CLI 执行失败', { error: describe(error) });
     }
     const text = formatErrorForCli(error);

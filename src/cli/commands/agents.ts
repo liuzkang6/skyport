@@ -2,8 +2,9 @@
  * agent 命令组：签发 / 查看 / 暂停 / 吊销 + agent run（AI 一站式）。
  * key 只在 create 输出一次；M2 无轮换命令（spec 范围），轮换 = revoke + 重建。
  */
-import { Command, Option } from 'commander';
+import { Command, InvalidArgumentError, Option } from 'commander';
 import { getConfig } from '../../config/config';
+import { readFileUtf8 } from '../../adapters/fs';
 import {
   createAgent,
   getAgent,
@@ -13,6 +14,7 @@ import {
 } from '../../services/agents';
 import { agentRun } from '../../services/actions';
 import { RISK_LEVELS, type RiskLevel } from '../../services/risk';
+import { executionFailureOf } from './actions';
 import {
   printJson,
   renderAgentDetail,
@@ -36,6 +38,7 @@ interface RunOptions {
   readonly riskHint?: string | undefined;
   readonly waitSeconds?: string | undefined;
   readonly apiKey?: string | undefined;
+  readonly apiKeyFile?: string | undefined;
   readonly json?: boolean | undefined;
 }
 
@@ -114,11 +117,18 @@ export function buildAgentCommand(): Command {
     .option('--target <asset>', '目标资产（缺省本机）')
     .option('--reason <text>', '行动理由')
     .addOption(new Option('--risk-hint <level>', '自报风险（只升不降）').choices([...RISK_LEVELS]))
-    .option('--wait-seconds <seconds>', '等待审批的超时秒数', '120')
-    .option('--api-key <key>', 'API key（缺省读 SKYPORT_API_KEY）')
+    .option('--wait-seconds <seconds>', '等待审批的超时秒数（≥0，默认 120）', (value: string) => {
+      const seconds = Number(value);
+      if (!Number.isFinite(seconds) || seconds < 0) {
+        throw new InvalidArgumentError('需为非负整数（秒）');
+      }
+      return value;
+    }, '120')
+    .option('--api-key <key>', 'API key（缺省读 SKYPORT_API_KEY；建议改用 --api-key-file 或环境变量）')
+    .option('--api-key-file <path>', '从文件读 API key（红队 S11：避免 argv 泄露）')
     .option('--json', '机器可读输出')
     .action(async (options: RunOptions) => {
-      const apiKey = options.apiKey ?? getConfig().apiKey;
+      const apiKey = await resolveApiKey(options);
       const actor = resolveActor(apiKey);
       const waitMs = Math.max(0, Number(options.waitSeconds ?? '120')) * 1_000;
       const result = await agentRun(
@@ -130,10 +140,30 @@ export function buildAgentCommand(): Command {
           riskHint: options.riskHint as RiskLevel | undefined,
         },
         waitMs,
+        (pendingAction) => {
+          // 红队 U6：进入等待立即打印登记信息，不静默挂住
+          if (options.json !== true) {
+            process.stdout.write(`已登记 ${pendingAction.id}（${pendingAction.riskLevel}），等待人工审批（最长 ${options.waitSeconds ?? 120}s）…\n`);
+          }
+        },
       );
       if (options.json === true) printJson(result);
       else process.stdout.write(renderActionResult(result));
+      // 红队 S7：AI 侧同样感知执行失败（退出码 4），便于脚本判断
+      const failure = executionFailureOf(result);
+      if (failure !== undefined) throw failure;
     });
 
   return agent;
+}
+
+/** key 来源优先级：--api-key > --api-key-file > SKYPORT_API_KEY（红队 S11） */
+async function resolveApiKey(options: RunOptions): Promise<string | undefined> {
+  if (options.apiKey !== undefined) return options.apiKey;
+  if (options.apiKeyFile !== undefined) {
+    const fromFile = (await readFileUtf8(options.apiKeyFile)).trim();
+    if (fromFile.length === 0) throw new Error(`--api-key-file 文件为空: ${options.apiKeyFile}`);
+    return fromFile;
+  }
+  return getConfig().apiKey;
 }

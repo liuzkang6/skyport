@@ -121,6 +121,8 @@ const ACTION_STATUS_TEXT: Readonly<Record<string, string>> = {
   cancelled: '– 已取消',
 };
 
+const COMMAND_DISPLAY_WIDTH = 60;
+
 function actionStatusText(status: string): string {
   const text = ACTION_STATUS_TEXT[status] ?? status;
   if (status === 'success') return paint(GREEN, text);
@@ -129,25 +131,44 @@ function actionStatusText(status: string): string {
   return paint(DIM, text);
 }
 
+/** 发起者显示：agent 用名字（红队 U2），已删除/无名字回退 ID */
+function actorLabel(action: Action): string {
+  if (action.actorType === 'human') return `human:${action.actorId}`;
+  return `agent:${action.actorName ?? `${action.actorId}（已删除）`}`;
+}
+
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-export function renderActionList(actions: readonly Action[]): string {
+/** 看板与值守共用的行动行渲染（红队 U1/U3：命令截断必提示、理由必显示） */
+export function renderActionLine(action: Action): string {
+  const target = action.targetKind === 'local' ? '本机' : action.targetName;
+  const truncated = action.command.length > COMMAND_DISPLAY_WIDTH;
+  const command = truncated
+    ? `${truncate(action.command, COMMAND_DISPLAY_WIDTH)} ${paint(DIM, `（skyport action show ${action.id} 看全文）`)}`
+    : action.command;
+  const reason = action.reason === undefined ? '' : `  ${paint(DIM, truncate(`理由: ${action.reason}`, 44))}`;
+  return [
+    `${action.id}`,
+    actionStatusText(action.status),
+    paint(YELLOW, action.riskLevel),
+    paint(DIM, `${actorLabel(action)} → ${target}`),
+    command,
+    paint(DIM, action.createdAt.slice(5, 16).replace('T', ' ')),
+  ]
+    .join('  ')
+    .concat(reason);
+}
+
+export function renderActionList(actions: readonly Action[], hasMore = false): string {
   if (actions.length === 0) return '暂无行动。skyport action create 登记一条，或 skyport run 直通执行。\n';
-  const lines = [`行动看板（共 ${actions.length} 条）`, ''];
+  const lines = [`行动看板（共 ${actions.length} 条${hasMore ? '，仅显示最近一页' : ''}）`, ''];
   for (const action of actions) {
-    const target = action.targetKind === 'local' ? '本机' : action.targetName;
-    lines.push(
-      [
-        `  ${action.id}`,
-        actionStatusText(action.status),
-        paint(YELLOW, action.riskLevel),
-        paint(DIM, `${action.actorType}:${truncate(action.actorId, 14)} → ${target}`),
-        truncate(action.command, 48),
-        paint(DIM, action.createdAt.slice(5, 16).replace('T', ' ')),
-      ].join('  '),
-    );
+    lines.push(`  ${renderActionLine(action)}`);
+  }
+  if (hasMore) {
+    lines.push('', paint(DIM, '已达页大小上限：用 --agent/--target/--since/--offset 缩小或翻页。'));
   }
   return `${lines.join('\n')}\n`;
 }
@@ -163,7 +184,7 @@ export function renderActionDetail(
     `  目标:     ${action.targetKind === 'local' ? '本机' : `${action.targetName}（SSH）`}`,
     `  风险:     ${paint(YELLOW, action.riskLevel)}（来源 ${action.riskSource}）`,
     `  理由:     ${action.reason ?? '未填写'}`,
-    `  发起者:   ${action.actorType}:${action.actorId}`,
+    `  发起者:   ${actorLabel(action)}`,
     `  创建时间: ${action.createdAt}`,
   ];
   if (events.length > 0) {
@@ -174,9 +195,16 @@ export function renderActionDetail(
   }
   if (execution !== undefined) {
     lines.push('', '最近执行:');
-    lines.push(`  结果: ${execution.ok ? paint(GREEN, '成功') : paint(RED, '失败')}  退出码 ${execution.exitCode ?? '-'}  耗时 ${execution.durationMs}ms${execution.timedOut ? paint(RED, '  [超时]') : ''}`);
-    if (execution.stdout.length > 0) lines.push(`  stdout: ${truncate(execution.stdout, 200)}`);
-    if (execution.stderr.length > 0) lines.push(`  stderr: ${truncate(execution.stderr, 200)}`);
+    const attempts = execution.attempts > 1 ? paint(YELLOW, `  尝试 ${execution.attempts} 次`) : '';
+    lines.push(
+      `  结果: ${execution.ok ? paint(GREEN, '成功') : paint(RED, '失败')}  退出码 ${execution.exitCode ?? '-'}  耗时 ${execution.durationMs}ms${execution.timedOut ? paint(RED, '  [超时]') : ''}${attempts}`,
+    );
+    if (execution.stdout.length > 0) {
+      lines.push(`  stdout: ${truncate(execution.stdout, 200)}${execution.stdoutTruncated ? paint(YELLOW, '（已截断）') : ''}`);
+    }
+    if (execution.stderr.length > 0) {
+      lines.push(`  stderr: ${truncate(execution.stderr, 200)}${execution.stderrTruncated ? paint(YELLOW, '（已截断）') : ''}`);
+    }
     if (execution.error !== undefined) lines.push(`  错误:   ${truncate(execution.error, 200)}`);
   }
   return `${lines.join('\n')}\n`;
@@ -189,8 +217,9 @@ export function renderActionResult(result: ActionResult): string {
   if (execution === undefined) {
     lines.push(paint(DIM, '等待人工审批：skyport approve ' + action.id + ' / skyport reject ' + action.id));
   } else {
+    const attempts = execution.attempts > 1 ? `，尝试 ${execution.attempts} 次` : '';
     lines.push(
-      `  ${execution.ok ? paint(GREEN, `执行成功（${execution.durationMs}ms，退出码 ${execution.exitCode ?? '-'}）`) : paint(RED, `执行失败（${truncate(execution.error ?? execution.stderr, 120)}）`)}`,
+      `  ${execution.ok ? paint(GREEN, `执行成功（${execution.durationMs}ms，退出码 ${execution.exitCode ?? '-'}${attempts}）`) : paint(RED, `执行失败（${truncate(execution.error ?? execution.stderr, 120)}${attempts}）`)}`,
     );
     if (execution.stdout.length > 0) lines.push(`  stdout: ${truncate(execution.stdout, 300)}`);
   }
@@ -217,8 +246,9 @@ export function renderAgentList(agents: readonly Agent[]): string {
   for (const agent of agents) {
     const status =
       agent.status === 'active' ? paint(GREEN, '● active') : agent.status === 'paused' ? paint(YELLOW, '◐ paused') : paint(RED, '✕ revoked');
+    // 红队 S15：key 提示串只在 agent show 单查时展示，列表不显示
     lines.push(
-      `  ${agent.name}  ${status}  ${paint(DIM, agent.keyHint)}  上限 ${paint(YELLOW, agent.riskCeiling)}  资产 ${agent.assetPatterns.join(',')}  ${agent.scopes.includes('auto-exec-low') ? paint(GREEN, 'auto-low') : ''}`,
+      `  ${agent.name}  ${status}  上限 ${paint(YELLOW, agent.riskCeiling)}  资产 ${agent.assetPatterns.join(',')}  ${agent.scopes.includes('auto-exec-low') ? paint(GREEN, 'auto-low') : ''}`,
     );
   }
   return `${lines.join('\n')}\n`;
