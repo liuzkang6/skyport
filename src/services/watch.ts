@@ -15,7 +15,7 @@ export interface PendingDiff {
 
 /** seen = 上一轮的 pending id 集合；首轮传空集合即全部视为"新出现" */
 export function pollPending(seen: ReadonlySet<string>): PendingDiff {
-  const pending = listActions('pending');
+  const pending = listActions({ status: 'pending' }).actions;
   const currentIds = pending.map((action) => action.id);
   const fresh = pending.filter((action) => !seen.has(action.id));
   const resolvedIds = [...seen].filter((id) => !currentIds.includes(id));

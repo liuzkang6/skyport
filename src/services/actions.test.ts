@@ -126,7 +126,7 @@ describe('actions 行动状态机与治理', () => {
     expect(
       await captureActionError(() => createAction({ command: safeCommand(), actor, target: 'db-01' })),
     ).toBe('SKYPORT_PERMISSION_DENIED');
-    expect(listActions()).toHaveLength(0);
+    expect(listActions().actions).toHaveLength(0);
   });
 
   it('agent run：等待超时如实返回 pending；human 身份调用被拒', async () => {
@@ -145,7 +145,20 @@ describe('actions 行动状态机与治理', () => {
     expect(result.action.status).toBe('success');
     const events = getActionEvents(result.action.id).map((event) => event.event);
     expect(events).toEqual(['created', 'direct-run', 'exec-started', 'exec-finished']);
-    expect(listActions('success').map((action) => action.id)).toContain(result.action.id);
+    expect(listActions({ status: 'success' }).actions.map((action) => action.id)).toContain(result.action.id);
+  });
+
+  it('P2-U2/U5：行动带发起者名字（agent join）；台账支持按目标/发起者过滤与分页提示', async () => {
+    const issued = createAgent({ name: 'auditor', assetPatterns: ['*'], riskCeiling: 'high', autoExecLow: false });
+    const actor: ActorRef = { type: 'agent', id: issued.agent.id, name: issued.agent.name };
+    addAsset({ name: 't9', type: 'host', addr: '10.9.0.9' });
+    await createAction({ command: 'systemctl restart nginx', actor, target: 't9' });
+    const page = listActions({ status: 'pending', target: 't9', actor: 'auditor' });
+    expect(page.actions).toHaveLength(1);
+    expect(page.actions[0]?.actorName).toBe('auditor');
+    expect(page.actions[0]?.actorId).toBe(issued.agent.id);
+    expect(page.hasMore).toBe(false);
+    expect(listActions({ target: '不存在资产' }).actions).toHaveLength(0);
   });
 
   it('失败路径-输入校验：空命令 / 引号未闭合 / 超长命令 / 云账户目标', async () => {

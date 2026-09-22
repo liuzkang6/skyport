@@ -11,7 +11,7 @@ import {
   globMatch,
   type ActorRef,
 } from './agents';
-import { executeAction, insertEvent, getLastExecution, type Execution } from './action-exec';
+import { executeAction, claimTransition, insertEvent, getLastExecution, type Execution } from './action-exec';
 import { notifyPendingAction } from './notify';
 import { getAsset, listAssets, parseAddr, type Asset } from './assets';
 import {
@@ -19,6 +19,7 @@ import {
   assessRisk,
   COMMAND_MAX_LENGTH,
   loadPolicy,
+  normalizeCommand,
   REASON_MAX_LENGTH,
   tokenizeCommand,
   type RiskLevel,
@@ -49,6 +50,8 @@ export interface Action {
   readonly status: ActionStatus;
   readonly actorType: 'human' | 'agent';
   readonly actorId: string;
+  /** 发起者显示名（agent 的名字；human 为空——用 actorId 即用户名） */
+  readonly actorName: string | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -87,9 +90,14 @@ interface ActionRow {
   status: string;
   actor_type: string;
   actor_id: string;
+  actor_name: string | null;
   created_at: string;
   updated_at: string;
 }
+
+/** 行动查询统一带 agent 名字（红队 U2：发起者不显示内部 ID） */
+const ACTION_SELECT =
+  'SELECT a.*, g.name AS actor_name FROM actions a LEFT JOIN agents g ON a.actor_type = \'agent\' AND a.actor_id = g.id';
 
 interface EventRow {
   id: number;
@@ -102,7 +110,8 @@ interface EventRow {
 
 /** 登记行动：校验 → 风险评估 → agent 三件套 → 入库 pending →（低危+策略允许）自动批准执行 */
 export async function createAction(input: CreateActionInput): Promise<ActionResult> {
-  const command = input.command.trim();
+  // 红队 S15：入库前归一化（多行压单行），展示与执行同源
+  const command = normalizeCommand(input.command.trim());
   if (command.length === 0 || command.length > COMMAND_MAX_LENGTH) {
     throw createError(ERROR_CODES.ACTION_INVALID, `命令长度需在 1-${COMMAND_MAX_LENGTH} 之间`, {
       context: { length: command.length },
@@ -158,6 +167,7 @@ export async function createAction(input: CreateActionInput): Promise<ActionResu
     status: 'pending',
     actorType: input.actor.type,
     actorId: input.actor.id,
+    actorName: input.actor.name,
     createdAt: now,
     updatedAt: now,
   };
@@ -192,36 +202,48 @@ export async function createAction(input: CreateActionInput): Promise<ActionResu
     policy.autoExecLowRisk &&
     getAgent(input.actor.id).scopes.includes('auto-exec-low');
   if (humanAuto || agentAuto) {
-    return await approveAndExecute(action.id, input.actor, 'auto-approved');
+    if (!claimTransition(action.id, 'pending', 'approved')) {
+      throw invalidStateError(action.id, 'auto-approved');
+    }
+    insertEvent(action.id, 'auto-approved', input.actor);
+    const execution = await executeAction(action, input.actor);
+    return { action: getAction(action.id), execution };
   }
   // 停在 pending 等人：发一条出站通知（未配置不发、失败不阻断——尽力而为）
   await notifyPendingAction(action);
   return { action, execution: undefined };
 }
 
-/** 人工审批：只允许 human（服务层再校验一次，不信任 CLI），放行后立即同步执行 */
+/** 人工审批：只允许 human（服务层再校验一次，不信任 CLI），放行后立即同步执行。
+ * 状态迁移原子（红队 S10）：并发下只有一个 approve 成功。 */
 export async function approveAction(actionId: string, actor: ActorRef): Promise<ActionResult> {
   requireHuman(actor, 'approve');
-  return await approveAndExecute(actionId, actor, 'approved');
+  const action = getAction(actionId);
+  if (!claimTransition(actionId, 'pending', 'approved')) {
+    throw invalidStateError(actionId, 'approve');
+  }
+  insertEvent(actionId, 'approved', actor);
+  const execution = await executeAction(action, actor);
+  return { action: getAction(actionId), execution };
 }
 
 export function rejectAction(actionId: string, actor: ActorRef, note?: string | undefined): Action {
   requireHuman(actor, 'reject');
-  const action = expectPending(actionId, 'reject');
-  getDb()
-    .prepare('UPDATE actions SET status = ?, updated_at = ? WHERE id = ?')
-    .run('rejected', new Date().toISOString(), action.id);
-  insertEvent(action.id, 'rejected', actor, note === undefined ? undefined : { note });
+  const action = getAction(actionId);
+  if (!claimTransition(actionId, 'pending', 'rejected')) {
+    throw invalidStateError(actionId, 'reject');
+  }
+  insertEvent(actionId, 'rejected', actor, note === undefined ? undefined : { note });
   return { ...action, status: 'rejected', updatedAt: new Date().toISOString() };
 }
 
 export function cancelAction(actionId: string, actor: ActorRef): Action {
   requireHuman(actor, 'cancel');
-  const action = expectPending(actionId, 'cancel');
-  getDb()
-    .prepare('UPDATE actions SET status = ?, updated_at = ? WHERE id = ?')
-    .run('cancelled', new Date().toISOString(), action.id);
-  insertEvent(action.id, 'cancelled', actor);
+  const action = getAction(actionId);
+  if (!claimTransition(actionId, 'pending', 'cancelled')) {
+    throw invalidStateError(actionId, 'cancel');
+  }
+  insertEvent(actionId, 'cancelled', actor);
   return { ...action, status: 'cancelled', updatedAt: new Date().toISOString() };
 }
 
@@ -234,37 +256,103 @@ export async function runDirect(input: CreateActionInput): Promise<ActionResult>
   const actionId = created.action.id;
   // 直通：pending → 直接放行执行（低危自动路径已在 createAction 内消化）
   if (created.action.status === 'pending') {
-    return await approveAndExecute(actionId, input.actor, 'direct-run');
+    if (!claimTransition(actionId, 'pending', 'approved')) {
+      throw invalidStateError(actionId, 'direct-run');
+    }
+    insertEvent(actionId, 'direct-run', input.actor);
+    const execution = await executeAction(created.action, input.actor);
+    return { action: getAction(actionId), execution };
   }
   return created;
 }
 
-/** AI 一站式：创建 → 等待（审批或自动执行）→ 返回最终状态；超时如实返回 pending */
-export async function agentRun(input: CreateActionInput, waitMs: number): Promise<ActionResult> {
+/** AI 一站式：创建 → 等待（审批或自动执行）→ 返回最终状态；超时如实返回 pending。
+ * onPending 回调在进入等待前触发（红队 U6：CLI 立即打印登记信息而非静默挂住）。 */
+export async function agentRun(
+  input: CreateActionInput,
+  waitMs: number,
+  onPending?: (action: Action) => void,
+): Promise<ActionResult> {
   if (input.actor.type !== 'agent') {
     throw createError(ERROR_CODES.PERMISSION_DENIED, 'agent run 必须以 agent 身份调用（--api-key）', { context: {} });
   }
   const created = await createAction(input);
   if (isTerminal(created.action.status)) return created;
+  onPending?.(created.action);
+  return await waitForTerminal(created.action.id, waitMs);
+}
+
+/** 轮询一条行动直到终态或超时（超时如实返回当前状态） */
+export async function waitForTerminal(actionId: string, waitMs: number): Promise<ActionResult> {
   const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     await sleep(1_000);
-    const action = getAction(created.action.id);
-    if (isTerminal(action.status)) return { action, execution: getLastExecution(action.id) };
+    const action = getAction(actionId);
+    if (isTerminal(action.status)) return { action, execution: getLastExecution(actionId) };
   }
-  return { action: getAction(created.action.id), execution: getLastExecution(created.action.id) };
+  return { action: getAction(actionId), execution: getLastExecution(actionId) };
 }
 
-export function listActions(status?: ActionStatus | undefined): Action[] {
-  const rows =
-    status === undefined
-      ? (getDb().prepare('SELECT * FROM actions ORDER BY created_at DESC LIMIT 200').all() as ActionRow[])
-      : (getDb().prepare('SELECT * FROM actions WHERE status = ? ORDER BY created_at DESC LIMIT 200').all(status) as ActionRow[]);
-  return rows.map(rowToAction);
+export interface ListActionsFilter {
+  readonly status?: ActionStatus | undefined;
+  /** agent 名字或 ID；也可以是 human 用户名（红队 U5） */
+  readonly actor?: string | undefined;
+  readonly target?: string | undefined;
+  /** ISO 时间：只看此之后的行动 */
+  readonly since?: string | undefined;
+  readonly limit?: number | undefined;
+  readonly offset?: number | undefined;
+}
+
+export interface ActionPage {
+  readonly actions: readonly Action[];
+  /** 还有更早的记录未展示（达到页大小） */
+  readonly hasMore: boolean;
+}
+
+const DEFAULT_PAGE_SIZE = 200;
+
+export function listActions(filter: ListActionsFilter = {}): ActionPage {
+  const conditions: string[] = [];
+  const params: Record<string, string | number> = {};
+  if (filter.status !== undefined) {
+    conditions.push('a.status = @status');
+    params.status = filter.status;
+  }
+  if (filter.target !== undefined) {
+    conditions.push('a.target_name = @target');
+    params.target = filter.target;
+  }
+  if (filter.since !== undefined) {
+    conditions.push('a.created_at >= @since');
+    params.since = filter.since;
+  }
+  if (filter.actor !== undefined) {
+    // 名字优先解析成 agent id；解析不了按原值匹配（human 用户名或直接传 agent id）
+    let actorKey = filter.actor;
+    try {
+      actorKey = getAgent(filter.actor).id;
+    } catch {
+      // 保持原值
+    }
+    conditions.push(
+      "((a.actor_type = 'agent' AND a.actor_id = @actor) OR (a.actor_type = 'human' AND a.actor_id = @actorHuman))",
+    );
+    params.actor = actorKey;
+    params.actorHuman = filter.actor;
+  }
+  const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+  const limit = filter.limit ?? DEFAULT_PAGE_SIZE;
+  const offset = filter.offset ?? 0;
+  const rows = getDb()
+    .prepare(`${ACTION_SELECT}${where} ORDER BY a.created_at DESC LIMIT @limit OFFSET @offset`)
+    .all({ ...params, limit: limit + 1, offset }) as ActionRow[];
+  const hasMore = rows.length > limit;
+  return { actions: rows.slice(0, limit).map(rowToAction), hasMore };
 }
 
 export function getAction(actionId: string): Action {
-  const row = getDb().prepare('SELECT * FROM actions WHERE id = ?').get(actionId) as ActionRow | undefined;
+  const row = getDb().prepare(`${ACTION_SELECT} WHERE a.id = ?`).get(actionId) as ActionRow | undefined;
   if (row === undefined) {
     throw createError(ERROR_CODES.ACTION_NOT_FOUND, `行动不存在: ${actionId}`, { context: { actionId } });
   }
@@ -286,30 +374,13 @@ export function getActionEvents(actionId: string): ActionEvent[] {
   }));
 }
 
-async function approveAndExecute(
-  actionId: string,
-  actor: ActorRef,
-  event: 'approved' | 'auto-approved' | 'direct-run',
-): Promise<ActionResult> {
-  const action = expectPending(actionId, event);
-  getDb()
-    .prepare('UPDATE actions SET status = ?, updated_at = ? WHERE id = ?')
-    .run('approved', new Date().toISOString(), action.id);
-  insertEvent(action.id, event, actor);
-  const execution = await executeAction(action, actor);
-  return { action: getAction(action.id), execution };
-}
-
-function expectPending(actionId: string, operation: string): Action {
-  const action = getAction(actionId);
-  if (action.status !== 'pending') {
-    throw createError(
-      ERROR_CODES.ACTION_INVALID_STATE,
-      `行动 ${action.id} 当前状态为 ${action.status}，不能 ${operation}（仅 pending 可审批/取消）`,
-      { context: { actionId: action.id, status: action.status, operation } },
-    );
-  }
-  return action;
+function invalidStateError(actionId: string, operation: string): Error {
+  const current = getAction(actionId);
+  return createError(
+    ERROR_CODES.ACTION_INVALID_STATE,
+    `行动 ${actionId} 当前状态为 ${current.status}，不能 ${operation}（仅 pending 可审批/取消）`,
+    { context: { actionId, status: current.status, operation } },
+  );
 }
 
 function requireHuman(actor: ActorRef, operation: string): void {
@@ -369,6 +440,7 @@ function rowToAction(row: ActionRow): Action {
     status: row.status as ActionStatus,
     actorType: row.actor_type as 'human' | 'agent',
     actorId: row.actor_id,
+    actorName: row.actor_name ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
