@@ -116,10 +116,42 @@ skyport run --exec 'node -e "require(\"child_process\").spawn(\"sleep\",[\"60\"]
 ```
 **预期**：GitHub 与本地 Gitea 两个远端都推送成功。
 
+## 9. 凭证三层
+
+```bash
+skyport agent create --name cred-test --assets '*' --risk-ceiling medium
+# 记下输出的 skr_ 令牌
+skyport agent login --refresh-token-file <(echo 'skr_...')
+# 输出 sks_ 会话令牌（30 分钟有效）
+skyport agent rotate cred-test
+# 输出新的 skr_，旧的立即失效
+```
+
+## 10. REST API v1
+
+```bash
+skyport serve --port 7100 &
+curl http://127.0.0.1:7100/api/v1/health
+# 预期：{"status":"ok"}
+
+TOKEN="sks_..."  # 从 agent login 获取
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/whoami
+# 预期：{"actor":{"type":"agent","name":"..."}}
+
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/assets
+# 预期：资产列表
+
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/audit/verify
+# 预期：{"ok":true,"checked":N}
+
+curl http://127.0.0.1:7100/api/v1/assets
+# 预期：403（无令牌）
+```
+
 ## 尚未实现（待后续版本）
 
-- [ ] 凭证三层（刷新令牌 + 任务租约 + 轮换）
-- [ ] REST API v1（serve 进程）
+- [x] 凭证三层（刷新令牌 + 会话令牌 + 轮换）
+- [x] REST API v1（serve 进程 + 核心端点 + Bearer 认证）
 - [ ] MCP 适配器
 - [ ] 节点 agent（Go）
 - [ ] 告警接入（Zabbix/Prometheus 适配器）

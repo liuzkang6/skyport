@@ -52,6 +52,18 @@
 
 第一轮报告（docs/redteam-qa-report.md）第二节全部通过项 + 7.1 修复确认表 + 7.3 N1/N2 修复——全部应保持通过。
 
+### H6. 凭证三层
+
+| ID | 步骤 | 预期 |
+| --- | --- | --- |
+| H6a | `agent login` 用无效 skr_ | PERMISSION_DENIED |
+| H6b | sks_ 过期后调用 | PERMISSION_DENIED |
+| H6c | 轮换后旧 skr_ login | PERMISSION_DENIED |
+| H6d | sks_ 闲置超 15 分钟后调用 | 自动吊销 + PERMISSION_DENIED |
+| H6e | agent revoked 后 sks_ 调用 | PERMISSION_DENIED |
+| H6f | REST API 无 Bearer 令牌 | 403 |
+| H6g | REST API 伪造 Bearer 令牌 | 403 |
+
 ## 已知残留（红队重点方向）
 
 1. **vault.key 是单点**——密钥文件泄漏=所有 secret 泄漏；当前信任模型=文件 0600 + 本机 root 边界
@@ -65,3 +77,6 @@
 - **高危发现** = 绕过审计链 / 绕过高危护栏 / 从保险箱提取明文 / 进程树击杀失效
 - **中危发现** = 拓扑注入 / CMDB 环导致死循环 / pending 过期绕过
 - **低危发现** = 信息泄露 / 错误信息不友好
+
+5. **凭证三层残留**——文件锁尚未实现（并发 login 场景）；复用检测（旧 skr_ 再出示→自动吊销 agent）逻辑在 spec 中但未实现
+6. **REST API 残留**——仅 GET 端点，无 POST（创建行动需走 CLI）；无速率限制
