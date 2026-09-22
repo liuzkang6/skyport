@@ -182,4 +182,25 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 8,
+    up: (db) => {
+      // 凭证三层（spec/agent-credentials）：刷新令牌 + 会话令牌
+      db.exec(`
+        ALTER TABLE agents ADD COLUMN refresh_token_hash TEXT;
+        ALTER TABLE agents ADD COLUMN refresh_expires_at TEXT;
+        CREATE TABLE agent_sessions (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          token_hash TEXT NOT NULL UNIQUE,
+          issued_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          last_used_at TEXT,
+          revoked INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_agent_sessions_agent ON agent_sessions(agent_id);
+      `);
+    },
+  },
 ];
+
