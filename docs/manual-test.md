@@ -159,6 +159,31 @@ echo '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | skyport mcp
 # 预期：返回 7 个工具
 ```
 
+## 12. 告警总线
+
+```bash
+skyport serve --port 7100 &
+TOKEN="sks_..."
+
+# Alertmanager 格式
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"alerts":[{"labels":{"alertname":"HighDisk","instance":"t1","severity":"critical"},"annotations":{"summary":"Disk 91%"}}]}' \
+  http://127.0.0.1:7100/api/v1/alerts
+# 预期：201 + 告警创建
+
+# 查看告警
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/alerts?status=open
+# 预期：包含 HighDisk 告警
+
+# ACK
+ALERT_ID=$(curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/alerts | python3 -c "import json,sys; print(json.load(sys.stdin)['alerts'][0]['id'])")
+curl -X PATCH -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/alerts/$ALERT_ID/ack
+# 预期：status 变为 ack
+
+# 统计
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/alerts/stats
+```
+
 ## 尚未实现（v0.4+ 待后续版本）
 
 - [x] 凭证三层（刷新令牌 + 会话令牌 + 轮换）
@@ -167,7 +192,7 @@ echo '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | skyport mcp
 - [x] 执行异步化（approveAsync + webhook 回推）
 - [x] 云 CLI 可操作（cloud-account → CLI 通道）
 - [ ] 节点 agent（Go）
-- [ ] 告警总线（Alerta 模型 + Zabbix/Prometheus 适配器）
+- [x] 告警总线（Alerta 模型 + Alertmanager/Zabbix/原生 适配器 + ACK SLA + REST 端点）
 - [ ] 基线三相训练 + 态势包
 - [ ] 资产执行互斥 + 事件认领
 - [ ] Break-glass 兜底
