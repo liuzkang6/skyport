@@ -184,7 +184,7 @@ export async function createAction(input: CreateActionInput): Promise<ActionResu
   };
   getDb()
     .prepare(
-      `INSERT INTO actions (id, command, target_asset_id, target_name, target_kind, reason, risk_level, risk_source, status, actor_type, actor_id, created_at, updated_at)
+      `INSERT INTO actions (id, command, target_asset_id, target_name, target_kind, reason, rollback, risk_level, risk_source, status, actor_type, actor_id, created_at, updated_at)
        VALUES (@id, @command, @targetAssetId, @targetName, @targetKind, @reason, @rollback, @riskLevel, @riskSource, 'pending', @actorType, @actorId, @createdAt, @updatedAt)`,
     )
     .run({

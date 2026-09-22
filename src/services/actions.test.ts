@@ -93,7 +93,7 @@ describe('actions 行动状态机与治理', () => {
   });
 
   it('正常路径：reject / cancel 落终态并留事件（带 note）', async () => {
-    const toReject = await createAction({ command: 'shutdown now', actor: HUMAN });
+    const toReject = await createAction({ command: 'shutdown now', actor: HUMAN, rollback: '重启机器即可' });
     const rejected = rejectAction(toReject.action.id, HUMAN, '太危险');
     expect(rejected.status).toBe('rejected');
     const toCancel = await createAction({ command: safeCommand(), actor: HUMAN });
@@ -182,7 +182,7 @@ describe('actions 行动状态机与治理', () => {
   });
 
   it('hint 只升不降贯穿行动记录：low 命令 + high hint → 行动风险 high', async () => {
-    const created = await createAction({ command: safeCommand(), actor: HUMAN, riskHint: 'high' });
+    const created = await createAction({ command: safeCommand(), actor: HUMAN, riskHint: 'high', rollback: '无需回滚（只读命令）' });
     expect(created.action.riskLevel).toBe('high');
     expect(getAction(created.action.id).riskSource).toBe('default-low');
   });
@@ -198,6 +198,20 @@ describe('actions 行动状态机与治理', () => {
     const allowed = await createAction({ command: 'ssh t1 "echo hi"', actor, target: 't1' });
     expect(allowed.action.status).toBe('pending');
     expect(allowed.action.riskLevel).toBe('medium');
+  });
+
+  it('护栏-high 风险无回滚声明 → ACTION_INVALID 拒绝登记', async () => {
+    expect(await captureActionError(() => createAction({ command: 'shutdown now', actor: HUMAN }))).toBe(
+      'SKYPORT_ACTION_INVALID',
+    );
+  });
+
+  it('护栏-dry-run：只评级展示不落库，行动 ID 为 dry-run', async () => {
+    const result = await createAction({ command: 'shutdown now', actor: HUMAN, dryRun: true });
+    expect(result.action.id).toBe('dry-run');
+    expect(result.action.riskLevel).toBe('high');
+    expect(result.action.status).toBe('pending');
+    expect(listActions().actions.find((a) => a.command === 'shutdown now')).toBeUndefined();
   });
 
   it('P0-S14：组合命令即使 low 也无自动执行资格（策略开启时仍 pending）；单段 low 照常自动执行', async () => {
