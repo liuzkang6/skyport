@@ -340,7 +340,7 @@ function insertAsset(prepared: PreparedAsset): Asset {
 }
 
 /** addr 支持 host / host:port / [IPv6]:port；ssh 模式可省端口（默认 22），其余必须带端口 */
-function parseAddr(addr: string, connectMode: ConnectMode | undefined): { host: string; port: number } {
+export function parseAddr(addr: string, connectMode: ConnectMode | undefined): { host: string; port: number } {
   let host = addr.trim();
   let port: number | undefined;
   const colon = host.lastIndexOf(':');

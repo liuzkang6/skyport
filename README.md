@@ -29,9 +29,11 @@ pnpm dev asset check web-01   # TCP 连通性检查
 | `pnpm verify` | 组合门禁：typecheck + lint + test |
 | `pnpm dev` | 以 tsx 直接运行 CLI（如 `pnpm dev doctor`） |
 
-CLI 子命令（`skyport <命令>`）：`init`（初始化）、`list`（资产清单，= `asset list`）、`asset add / import / list / show / check / remove`、`config`（打印生效配置）、`doctor`（自检）。查询类命令带 `--json` 可输出机器可读格式（供 AI 解析）。
+CLI 子命令（`skyport <命令>`）：`init`（初始化）、`list`（资产清单，= `asset list`）、`asset add / import / list / show / check / remove`、`agent create / list / show / pause / activate / revoke / run`（AI 一站式）、`action create / list / show`（行动台账）、`approve / reject / cancel`（人工审批，禁止带 key）、`run`（人自用直通）、`config`（打印生效配置）、`doctor`（自检）。查询类命令带 `--json` 可输出机器可读格式（供 AI 解析）。
 
-退出码约定：0 成功；1 未知错误；2 用法错误；3-7 config/exec/fs/network/permission 域；8 db 域；9 asset 域。
+治理速览：AI 以 `--api-key`（或 `SKYPORT_API_KEY`）发起行动 → 风险分级（低危且策略允许可自动执行；AI 自报风险只升不降）→ 中高危进 pending 等人 → `skyport approve <id>` 放行即执行 → 全程事件与执行留痕。风险策略放项目根 `skyport.policy.json`（`rules` / `whitelist` / `autoExecLowRisk`）。
+
+退出码约定：0 成功；1 未知错误；2 用法错误；3-7 config/exec/fs/network/permission 域；8 db；9 asset；10 agent；11 action。
 
 ## 配置
 

@@ -12,6 +12,8 @@ import { getConfig, loadConfig } from '../config/config';
 import { isSkyportError, type SkyportError } from '../errors/errors';
 import { formatLogEntry, rootLogger, type LogSink } from '../logger/logger';
 import { runDoctor } from '../services/doctor';
+import { buildAgentCommand } from './commands/agents';
+import { buildActionCommand, buildApprovalCommands } from './commands/actions';
 import { buildAssetCommand, configureListCommand } from './commands/assets';
 
 /** 退出码约定：0 成功；1 未知错误；2 用法错误；3-9 按错误域（config/exec/fs/network/permission/db/asset） */
@@ -27,6 +29,8 @@ const EXIT_BY_DOMAIN: readonly (readonly [string, number])[] = [
   ['SKYPORT_PERMISSION_', 7],
   ['SKYPORT_DB_', 8],
   ['SKYPORT_ASSET_', 9],
+  ['SKYPORT_AGENT_', 10],
+  ['SKYPORT_ACTION_', 11],
 ];
 
 /** commander 自身展示 help/version 也走 exitOverride 抛出，这两类视为正常退出 */
@@ -123,6 +127,9 @@ function buildProgram(): Command {
   // 裸 skyport list 即资产清单（spec 约定）
   configureListCommand(program.command('list'));
   program.addCommand(buildAssetCommand());
+  program.addCommand(buildActionCommand());
+  program.addCommand(buildAgentCommand());
+  buildApprovalCommands(program);
 
   program
     .command('doctor')

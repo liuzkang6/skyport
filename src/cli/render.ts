@@ -1,7 +1,10 @@
 /**
- * CLI 文本渲染：资产清单/详情/检查结果的人类可读输出。
+ * CLI 文本渲染：资产/行动/agent 的人类可读输出。
  * 颜色仅在 stdout 是终端时启用（管道/重定向输出纯文本，保证可 grep）。
  */
+import type { IssuedAgent, Agent } from '../services/agents';
+import type { Action, ActionEvent, ActionResult } from '../services/actions';
+import type { Execution } from '../services/action-exec';
 import type { Asset, AssetCheck, AssetType, CheckResult, ImportSummary } from '../services/assets';
 
 const TYPE_ORDER: readonly AssetType[] = ['host', 'cluster', 'cloud-account'];
@@ -106,4 +109,132 @@ export function renderCheckResult(result: CheckResult): string {
 export function renderImportSummary(summary: ImportSummary): string {
   const names = summary.names.join('、');
   return `已导入 ${summary.added} 项资产：${names}\n`;
+}
+
+const ACTION_STATUS_TEXT: Readonly<Record<string, string>> = {
+  pending: '○ 待审批',
+  approved: '◐ 已放行',
+  executing: '⟳ 执行中',
+  success: '● 成功',
+  failed: '✕ 失败',
+  rejected: '⊘ 已否决',
+  cancelled: '– 已取消',
+};
+
+function actionStatusText(status: string): string {
+  const text = ACTION_STATUS_TEXT[status] ?? status;
+  if (status === 'success') return paint(GREEN, text);
+  if (status === 'failed') return paint(RED, text);
+  if (status === 'pending' || status === 'executing') return paint(YELLOW, text);
+  return paint(DIM, text);
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+export function renderActionList(actions: readonly Action[]): string {
+  if (actions.length === 0) return '暂无行动。skyport action create 登记一条，或 skyport run 直通执行。\n';
+  const lines = [`行动看板（共 ${actions.length} 条）`, ''];
+  for (const action of actions) {
+    const target = action.targetKind === 'local' ? '本机' : action.targetName;
+    lines.push(
+      [
+        `  ${action.id}`,
+        actionStatusText(action.status),
+        paint(YELLOW, action.riskLevel),
+        paint(DIM, `${action.actorType}:${truncate(action.actorId, 14)} → ${target}`),
+        truncate(action.command, 48),
+        paint(DIM, action.createdAt.slice(5, 16).replace('T', ' ')),
+      ].join('  '),
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderActionDetail(
+  action: Action,
+  events: readonly ActionEvent[],
+  execution: Execution | undefined,
+): string {
+  const lines = [
+    `行动 ${action.id}  ${actionStatusText(action.status)}`,
+    `  命令:     ${action.command}`,
+    `  目标:     ${action.targetKind === 'local' ? '本机' : `${action.targetName}（SSH）`}`,
+    `  风险:     ${paint(YELLOW, action.riskLevel)}（来源 ${action.riskSource}）`,
+    `  理由:     ${action.reason ?? '未填写'}`,
+    `  发起者:   ${action.actorType}:${action.actorId}`,
+    `  创建时间: ${action.createdAt}`,
+  ];
+  if (events.length > 0) {
+    lines.push('', '事件流:');
+    for (const event of events) {
+      lines.push(`  ${paint(DIM, event.createdAt.slice(5, 19).replace('T', ' '))}  ${event.event}  ${paint(DIM, `${event.actorType}:${event.actorId}`)}`);
+    }
+  }
+  if (execution !== undefined) {
+    lines.push('', '最近执行:');
+    lines.push(`  结果: ${execution.ok ? paint(GREEN, '成功') : paint(RED, '失败')}  退出码 ${execution.exitCode ?? '-'}  耗时 ${execution.durationMs}ms${execution.timedOut ? paint(RED, '  [超时]') : ''}`);
+    if (execution.stdout.length > 0) lines.push(`  stdout: ${truncate(execution.stdout, 200)}`);
+    if (execution.stderr.length > 0) lines.push(`  stderr: ${truncate(execution.stderr, 200)}`);
+    if (execution.error !== undefined) lines.push(`  错误:   ${truncate(execution.error, 200)}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderActionResult(result: ActionResult): string {
+  const { action, execution } = result;
+  const head = `${action.id}  ${actionStatusText(action.status)}  ${paint(YELLOW, action.riskLevel)}  ${truncate(action.command, 60)}`;
+  const lines = [head];
+  if (execution === undefined) {
+    lines.push(paint(DIM, '等待人工审批：skyport approve ' + action.id + ' / skyport reject ' + action.id));
+  } else {
+    lines.push(
+      `  ${execution.ok ? paint(GREEN, `执行成功（${execution.durationMs}ms，退出码 ${execution.exitCode ?? '-'}）`) : paint(RED, `执行失败（${truncate(execution.error ?? execution.stderr, 120)}）`)}`,
+    );
+    if (execution.stdout.length > 0) lines.push(`  stdout: ${truncate(execution.stdout, 300)}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderIssuedKey(issued: IssuedAgent): string {
+  const { agent, plaintextKey } = issued;
+  return [
+    paint(GREEN, `agent ${agent.name}（${agent.id}）已创建`),
+    '',
+    `  API Key（只显示这一次，请立即保存到安全位置）:`,
+    `  ${plaintextKey}`,
+    '',
+    paint(DIM, `  权限：风险上限 ${agent.riskCeiling} · 资产范围 ${agent.assetPatterns.join(', ')} · scopes ${agent.scopes.join(', ')}`),
+    paint(DIM, '  AI 调用方式：skyport agent run --api-key <key> --exec "..." 或设 SKYPORT_API_KEY'),
+    '',
+  ].join('\n');
+}
+
+export function renderAgentList(agents: readonly Agent[]): string {
+  if (agents.length === 0) return '暂无 agent。skyport agent create --name x --assets "prod-*" --risk-ceiling medium\n';
+  const lines = [`agent 列表（共 ${agents.length} 个）`, ''];
+  for (const agent of agents) {
+    const status =
+      agent.status === 'active' ? paint(GREEN, '● active') : agent.status === 'paused' ? paint(YELLOW, '◐ paused') : paint(RED, '✕ revoked');
+    lines.push(
+      `  ${agent.name}  ${status}  ${paint(DIM, agent.keyHint)}  上限 ${paint(YELLOW, agent.riskCeiling)}  资产 ${agent.assetPatterns.join(',')}  ${agent.scopes.includes('auto-exec-low') ? paint(GREEN, 'auto-low') : ''}`,
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderAgentDetail(agent: Agent): string {
+  return [
+    `agent ${agent.name}（${agent.id}）`,
+    `  状态:     ${agent.status}`,
+    `  key 提示: ${agent.keyHint}（明文不可再查）`,
+    `  风险上限: ${agent.riskCeiling}`,
+    `  资产范围: ${agent.assetPatterns.join('、')}`,
+    `  scopes:   ${agent.scopes.join('、')}`,
+    `  到期:     ${agent.expiresAt ?? '永久'}`,
+    `  创建时间: ${agent.createdAt}`,
+  ]
+    .join('\n')
+    .concat('\n');
 }
