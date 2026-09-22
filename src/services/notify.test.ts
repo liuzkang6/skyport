@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { closeDb } from '../adapters/db';
 import { resetConfigCache } from '../config/config';
-import { buildPendingPayload, notifyPendingAction } from './notify';
+import { buildPendingPayload, notifyPendingAction, redactSecrets } from './notify';
 import { createAction, approveAction } from './actions';
 import { humanUserId, type ActorRef } from './agents';
 import type { Action } from './actions';
@@ -28,6 +28,7 @@ function sampleAction(overrides: Partial<Action> = {}): Action {
     status: 'pending',
     actorType: 'agent',
     actorId: 'agt_test001',
+    actorName: 'tester',
     createdAt: '2026-09-22T00:00:00.000Z',
     updatedAt: '2026-09-22T00:00:00.000Z',
     ...overrides,
@@ -78,6 +79,27 @@ afterEach(async () => {
 });
 
 describe('notify 出站通知', () => {
+  it('凭据遮蔽（红队 S6）：-p 密码 / password= / token= / skp_ key 不出站', () => {
+    expect(redactSecrets('mysql -uadmin -pS3cretPass123 -e "SELECT 1"')).not.toContain('S3cretPass123');
+    expect(redactSecrets('mysql -uadmin -pS3cretPass123 -e "SELECT 1"')).toContain('-p ***');
+    expect(redactSecrets('curl -H "token=abc123" http://x')).not.toContain('abc123');
+    expect(redactSecrets('echo skp_0123456789abcdef0123456789abcdef')).toBe('echo skp_***');
+    expect(redactSecrets('echo 无凭据')).toBe('echo 无凭据');
+  });
+
+  it('正常路径：含密码的命令经 webhook 出站时已遮蔽并标记 redacted', async () => {
+    const capture = await listenCapture();
+    process.env.SKYPORT_NOTIFY_WEBHOOK_URL = capture.url;
+    resetConfigCache();
+    const notified = await notifyPendingAction(
+      sampleAction({ command: 'mysql -uadmin -pTopSecret9 -e "SELECT 1"' }),
+    );
+    expect(notified).toBe(true);
+    const payload = JSON.parse(capture.bodies[0] ?? '{}');
+    expect(payload.command).not.toContain('TopSecret9');
+    expect(payload.redacted).toBe(true);
+  });
+
   it('payload 结构：event/actionId/command/risk/actor/hint 齐全', () => {
     const payload = buildPendingPayload(sampleAction());
     expect(payload.event).toBe('skyport.action.pending');

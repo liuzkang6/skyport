@@ -1,7 +1,9 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { chmodSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { DATA_DIR } from '../config/config';
 import { openDatabase } from './db';
 import { MIGRATIONS } from './migrations';
 
@@ -41,10 +43,27 @@ describe('db 适配器（SQLite 底座）', () => {
     second.close();
   });
 
-  it('安全基线：数据目录 0700、库文件 0600（信任模型的文件层加固）', async () => {
-    const db = openDatabase(dbPath);
+  it('安全基线：默认数据目录 0700、库文件 0600（在 DATA_DIR 内建临时库验证后清理）', async () => {
+    const db = openDatabase(join(DATA_DIR, `perm-test-${Date.now()}.db`));
     db.close();
-    expect((await stat(dirname(dbPath))).mode & 0o777).toBe(0o700);
-    expect((await stat(dbPath)).mode & 0o777).toBe(0o600);
+    expect((await stat(DATA_DIR)).mode & 0o777).toBe(0o700);
+    const files = (await readdir(DATA_DIR)).filter((name) => name.startsWith('perm-test-'));
+    for (const name of files) {
+      const file = join(DATA_DIR, name);
+      expect((await stat(file)).mode & 0o777).toBe(0o600);
+      rmSync(file, { force: true });
+    }
+  });
+
+  it('红队 S5：自定义 dbPath 不 chmod 使用者目录（0755 保持不变），库仍可建可迁移', async () => {
+    const customDir = join(tempDir, 'shared');
+    mkdirSync(customDir, { mode: 0o755 });
+    chmodSync(customDir, 0o755);
+    const customPath = join(customDir, 'x.db');
+    const db = openDatabase(customPath);
+    const row = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number | null };
+    expect(row.v).toBe(MIGRATIONS.length);
+    db.close();
+    expect((await stat(customDir)).mode & 0o777).toBe(0o755);
   });
 });
