@@ -30,7 +30,8 @@ for (const name of deps.sort()) {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   const license = manifest.license ?? 'UNKNOWN';
   const version = manifest.version ?? '?';
-  const homepage = manifest.homepage ?? manifest.repository ?? '';
+  const repo = typeof manifest.repository === 'string' ? manifest.repository : manifest.repository?.url ?? '';
+  const homepage = manifest.homepage ?? repo;
   lines.push(
     `## ${name} v${version}`,
     '',
