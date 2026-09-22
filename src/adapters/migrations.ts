@@ -163,4 +163,23 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 7,
+    up: (db) => {
+      // 保险箱（spec/vault）：AES-256-GCM 加密存储
+      db.exec(`
+        CREATE TABLE secrets (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          encrypted_value TEXT NOT NULL,
+          iv TEXT NOT NULL,
+          auth_tag TEXT NOT NULL,
+          hint TEXT NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
