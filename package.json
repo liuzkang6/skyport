@@ -1,6 +1,6 @@
 {
   "name": "skyport",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "skyport —— 类 Linear 的 AI 运维行动与治理平台（CLI 形态）",
   "type": "module",
   "private": true,
@@ -15,7 +15,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "test": "vitest run",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test",
+    "build": "esbuild src/cli/index.ts --bundle --platform=node --format=esm --outfile=dist/cli/index.mjs --external:better-sqlite3 --banner:js='#!/usr/bin/env node'",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "coverage": "vitest run --coverage",
     "dev": "tsx src/cli/index.ts"
   },
   "dependencies": {
@@ -26,6 +28,8 @@
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.2",
+    "@vitest/coverage-v8": "^5.0.1",
+    "esbuild": "^0.28.2",
     "oxlint": "^1.85.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

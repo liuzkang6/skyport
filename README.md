@@ -26,8 +26,12 @@ pnpm dev asset check web-01   # TCP 连通性检查
 | `pnpm typecheck` | TypeScript 类型检查（tsc --noEmit，严格模式三开关全开） |
 | `pnpm lint` | oxlint 静态检查 |
 | `pnpm test` | vitest 单元测试 |
-| `pnpm verify` | 组合门禁：typecheck + lint + test |
+| `pnpm build` | esbuild 打包单文件产物 `dist/cli/index.mjs`（bin 入口优先使用产物，启动 ~0.2s） |
+| `pnpm verify` | 组合门禁：typecheck + lint + test + build |
+| `pnpm coverage` | 测试覆盖率报告 |
 | `pnpm dev` | 以 tsx 直接运行 CLI（如 `pnpm dev doctor`） |
+
+部署：克隆后 `pnpm install && pnpm build`，把 `bin/skyport.mjs` 软链或包装到 PATH（内含 node≥20 版本守卫，优先走 dist 产物）。CI（`.github/workflows/ci.yml`）在 node 20/22 矩阵跑 verify，并冒烟 node18 下的人话报错。数据备份：`skyport backup`（默认 `~/.skyport/backups`，保留份数 `SKYPORT_BACKUP_KEEP` 可配，自定义目录不动权限）。
 
 CLI 子命令（`skyport <命令>`）：`init`、`list`（资产清单，`--select` 交互下钻）、`asset add / import / list / show / check / remove`、`agent create / list / show / pause / activate / revoke / run`（AI 一站式，key 可用 `--api-key-file` 读文件）、`action create / list / show`（台账支持 `--status/--agent/--target/--since/--limit/--offset` 过滤分页）、`approve <id...> / reject <id...>`（可批量）、`cancel`、`run`（人自用直通）、`watch`（前台值守，终端内可就地 y/n 审批，`--once` 单次巡检）、`config`、`doctor`。查询类命令带 `--json` 输出机器可读格式。
 
