@@ -6,13 +6,15 @@
 import { randomUUID } from 'node:crypto';
 import { CommanderError, Command } from 'commander';
 import pkg from '../../package.json';
+import { getDb } from '../adapters/db';
 import { appendLineSync } from '../adapters/fs';
 import { getConfig, loadConfig } from '../config/config';
 import { isSkyportError, type SkyportError } from '../errors/errors';
 import { formatLogEntry, rootLogger, type LogSink } from '../logger/logger';
 import { runDoctor } from '../services/doctor';
+import { buildAssetCommand, configureListCommand } from './commands/assets';
 
-/** 退出码约定：0 成功；1 未知错误；2 用法错误；3-7 按错误域（config/exec/fs/network/permission） */
+/** 退出码约定：0 成功；1 未知错误；2 用法错误；3-9 按错误域（config/exec/fs/network/permission/db/asset） */
 const EXIT_OK = 0;
 const EXIT_UNKNOWN = 1;
 const EXIT_USAGE = 2;
@@ -23,6 +25,8 @@ const EXIT_BY_DOMAIN: readonly (readonly [string, number])[] = [
   ['SKYPORT_FS_', 5],
   ['SKYPORT_NETWORK_', 6],
   ['SKYPORT_PERMISSION_', 7],
+  ['SKYPORT_DB_', 8],
+  ['SKYPORT_ASSET_', 9],
 ];
 
 /** commander 自身展示 help/version 也走 exitOverride 抛出，这两类视为正常退出 */
@@ -92,6 +96,33 @@ function buildProgram(): Command {
     .version(pkg.version);
   // 把 commander 默认的 process.exit 收回来，统一交给本文件唯一的 catch 处理
   program.exitOverride();
+
+  program
+    .command('init')
+    .description('初始化数据目录与数据库（skyport.db），打印上手命令')
+    .action(() => {
+      const config = getConfig();
+      getDb(); // 打开即建库即迁移
+      process.stdout.write(
+        [
+          'skyport 初始化完成：',
+          `  数据库    ${config.dbPath}（目录 0700 / 文件 0600）`,
+          '',
+          '接下来可以：',
+          '  skyport asset add --name web-01 --type host --addr 10.0.1.11 --label env=prod',
+          '  skyport asset import fleet.json',
+          '  skyport list                 # 查看资产清单',
+          '  skyport asset check web-01   # 连通性检查',
+          '  skyport doctor               # 环境自检',
+        ]
+          .join('\n')
+          .concat('\n'),
+      );
+    });
+
+  // 裸 skyport list 即资产清单（spec 约定）
+  configureListCommand(program.command('list'));
+  program.addCommand(buildAssetCommand());
 
   program
     .command('doctor')
