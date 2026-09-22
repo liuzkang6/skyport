@@ -3,7 +3,7 @@
  * 业务代码禁止直接调 node:fs；需要文件能力时从本模块导入。
  * 所有底层异常统一归一化为 SKYPORT_FS_* / SKYPORT_PERMISSION_* 错误码再上抛。
  */
-import { appendFileSync, chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createError, ERROR_CODES, type SkyportError } from '../errors/errors';
 
@@ -104,6 +104,26 @@ export function ensureDir(path: string, mode?: number): void {
 export function setFileMode(path: string, mode: number): void {
   try {
     chmodSync(path, mode);
+  } catch (error) {
+    throw normalizeFsError(path, 'write', error);
+  }
+}
+
+export function fileExistsSync(path: string): boolean {
+  return existsSync(path);
+}
+
+export function readBinarySync(path: string): Buffer {
+  try {
+    return readFileSync(path);
+  } catch (error) {
+    throw normalizeFsError(path, 'read', error);
+  }
+}
+
+export function writeBinarySync(path: string, data: Buffer): void {
+  try {
+    writeFileSync(path, data);
   } catch (error) {
     throw normalizeFsError(path, 'write', error);
   }

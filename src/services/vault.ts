@@ -5,10 +5,10 @@
  * 凭证不进命令文本/日志/审计/通知（比 webhook 脱敏正则彻底）。
  */
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { fileExistsSync, readBinarySync, writeBinarySync, setFileMode } from '../adapters/fs';
 import { join } from 'node:path';
 import { getDb } from '../adapters/db';
-import { DATA_DIR, getConfig } from '../config/config';
+import { DATA_DIR } from '../config/config';
 import { createError, ERROR_CODES } from '../errors/errors';
 import { rootLogger } from '../logger/logger';
 
@@ -30,17 +30,18 @@ function vaultKeyPath(): string {
   return join(DATA_DIR, 'vault.key');
 }
 
+
 /** 获取或生成主密钥（32 字节 = AES-256） */
 function getOrCreateMasterKey(): Buffer {
   const path = vaultKeyPath();
-  if (!existsSync(path)) {
+  if (!fileExistsSync(path)) {
     const key = randomBytes(32);
-    writeFileSync(path, key, { mode: 0o600 });
-    chmodSync(path, 0o600);
+    writeBinarySync(path, key);
+    setFileMode(path, 0o600);
     rootLogger.info('已生成保险箱主密钥', { path });
     return key;
   }
-  const key = readFileSync(path);
+  const key = readBinarySync(path);
   if (key.length !== 32) {
     throw createError(ERROR_CODES.CONFIG_INVALID, `保险箱主密钥长度异常（${key.length} 字节，应为 32）`, { context: { path } });
   }
