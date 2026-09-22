@@ -148,13 +148,29 @@ curl http://127.0.0.1:7100/api/v1/assets
 # 预期：403（无令牌）
 ```
 
-## 尚未实现（待后续版本）
+## 11. MCP 适配器
+
+```bash
+skyport mcp  # stdio 模式启动
+# 在另一个终端发 JSON-RPC：
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | skyport mcp
+# 预期：返回 serverInfo
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | skyport mcp
+# 预期：返回 7 个工具
+```
+
+## 尚未实现（v0.4+ 待后续版本）
 
 - [x] 凭证三层（刷新令牌 + 会话令牌 + 轮换）
 - [x] REST API v1（serve 进程 + 核心端点 + Bearer 认证）
-- [ ] MCP 适配器
+- [x] MCP 适配器（7 工具/JSON-RPC stdio）
+- [x] 执行异步化（approveAsync + webhook 回推）
+- [x] 云 CLI 可操作（cloud-account → CLI 通道）
 - [ ] 节点 agent（Go）
-- [ ] 告警接入（Zabbix/Prometheus 适配器）
-- [ ] 运行时认证（ZCode fork 集成）
-- [ ] 编排引擎（工作流剧本）
+- [ ] 告警总线（Alerta 模型 + Zabbix/Prometheus 适配器）
+- [ ] 基线三相训练 + 态势包
+- [ ] 资产执行互斥 + 事件认领
+- [ ] Break-glass 兜底
+- [ ] 运行时认证（ZCode fork 集成 + 四角色）
+- [ ] 编排引擎（vendor 工作流引擎 + L3 剧本）
 - [ ] Web UI
