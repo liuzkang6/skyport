@@ -65,15 +65,22 @@ export function claimTransition(actionId: string, from: string, to: string): boo
   return result.changes > 0;
 }
 
-/** 解析执行目标：本机直接用 token[0]；SSH 走资产的 addr（支持 user@host:port 与 ssh config 别名） */
-function buildExecSpec(action: ActionCore): ExecSpec {
+/**
+ * 解析执行目标。
+ * 关键决定（红队 N2）：
+ * - 本地：tokenizeCommand 切成参数数组直 exec，不经 shell；
+ * - SSH：**把入库的原始命令字符串原样作为单一参数**交给 ssh——远端 shell 解释的就是
+ *   审批人读到的同一串字符，杜绝"本地剥引号→空格拼接→远端拆散"的语义变形
+ *   （`touch "/tmp/a b.txt"` 不再变成创建两个文件）。
+ * - 外层 ssh 固定 BatchMode=yes：密钥认证不弹交互，异常时快速失败而非挂到超时。
+ */
+export function buildExecSpec(action: ActionCore): ExecSpec {
   const tokens = tokenizeCommand(action.command);
   const head = tokens[0];
   if (head === undefined) {
     throw createError(ERROR_CODES.ACTION_INVALID, '命令切分后为空', { context: { command: action.command } });
   }
-  const rest = tokens.slice(1);
-  if (action.targetKind === 'local') return { command: head, args: rest };
+  if (action.targetKind === 'local') return { command: head, args: tokens.slice(1) };
   if (action.targetAssetId === undefined) {
     throw createError(ERROR_CODES.ACTION_INVALID, `行动目标资产已失效: ${action.targetName}`, {
       context: { actionId: action.id },
@@ -88,7 +95,10 @@ function buildExecSpec(action: ActionCore): ExecSpec {
   const { user, host, port } = parseAddr(asset.addr, asset.connectMode ?? 'ssh');
   // 带 user@ 前缀以指定用户登录；省略 user 时 ssh 用本机当前用户（文档已注明）
   const destination = user === undefined ? host : `${user}@${host}`;
-  return { command: 'ssh', args: ['-p', String(port), '--', destination, ...tokens] };
+  return {
+    command: 'ssh',
+    args: ['-p', String(port), '-o', 'BatchMode=yes', '--', destination, action.command],
+  };
 }
 
 /** 执行一条已放行的行动：原子占位 executing → 执行 → 落结果与终态 */
