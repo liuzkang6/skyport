@@ -10,7 +10,7 @@ AIOps 与告警管理平台，"监控界的 GitHub Actions"。
 
 **内化 → ②归并 + L3 自动化配方**
 - 声明式 YAML workflow 三段式：`triggers`（alert/incident/schedule/manual + filters）→ `steps`（取数/enrichment）→ `actions`（执行操作）
-- 双轨制决策：**确定性自动化**（路由/通知/工单/enrichment）用 Keep 式 YAML 壳；**智能处置**用 SKILL.md 技能内核。L3 剧本 = YAML 编排壳 + 技能内核
+- ~~双轨制（YAML 壳 + 技能内核）~~ **已修订撤销**：编排统一走 vendor 的 ZCode 引擎 TS 剧本（避免三套格式并存）；Keep 保留的是**触发器/过滤器**概念（映射为告警总线订阅规则）与告警关联思路
 - AI 做告警关联与 enrichment 的后端抽象
 
 ## Alerta（alerta/alerta，★2.5k，Python 9.x）
@@ -46,7 +46,7 @@ K8s AI 诊断，CNCF 生态。
 
 **内化 → ③诊断（agentic loop + 上下文预算工程）**
 - Operator mode：后台 24/7 巡检 + 主动 Slack 上报——与我们"节点 agent 定时巡检 + 告警总线"同构，验证方向
-- **上下文预算工程**（比我们的 100KB 截断精细一档）：server-side 过滤、JSON 树遍历、工具输出转换器防大载荷进上下文；per-tool 内存上限、大结果流式落盘、输出预算化防 OOM——进诊断工具集设计
+- ~~上下文预算工程~~ **已降级砍除**（为 PB 级设计，我们用不上）：保留三条廉价纪律——输出截断、结构化摘要先行/按需下钻、先过滤再进提示词
 - 双向告警集成（从 AlertManager/PagerDuty 拉告警 + 回写调查结论）
 
 ## OpenSRE（Tracer-Cloud/opensre，★11.2k，Apache-2.0，public alpha）
