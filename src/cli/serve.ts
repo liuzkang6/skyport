@@ -12,6 +12,7 @@ import { listAssets, getAsset } from '../services/assets';
 import { listServices } from '../services/cmdb';
 import { verifyAuditChain } from '../services/audit-chain';
 import { detectAndParse, ingestAlert, listAlerts, ackAlert, closeAlert, getAlertStats } from '../services/alert-bus';
+import { buildContextPack, summarizeContextPack } from '../services/context-pack';
 
 export interface ServeOptions {
   readonly port?: number | undefined;
@@ -170,6 +171,21 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   if (method === 'GET' && path === '/api/v1/whoami') {
     sendJson(res, 200, { actor });
+    return;
+  }
+
+  // ── 态势包端点（v0.4 知识层）──
+
+  if (method === 'GET' && path.startsWith('/api/v1/context/') && path.endsWith('/summary')) {
+    const assetName = decodeURIComponent(path.split('/')[3] ?? '');
+    const pack = buildContextPack(assetName);
+    sendJson(res, 200, summarizeContextPack(pack));
+    return;
+  }
+
+  if (method === 'GET' && path.startsWith('/api/v1/context/')) {
+    const assetName = decodeURIComponent(path.split('/')[3] ?? '');
+    sendJson(res, 200, buildContextPack(assetName));
     return;
   }
 
