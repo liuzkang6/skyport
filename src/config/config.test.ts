@@ -38,6 +38,17 @@ describe('config 配置体系', () => {
     expect(config.execMaxRetries).toBe(3);
     expect(config.execMaxOutputBytes).toBe(100 * 1024);
     expect(config.execBackoffBaseMs).toBe(200);
+    expect(config.checkTimeoutMs).toBe(5_000);
+    expect(config.dbPath).toContain(join('.skyport', 'skyport.db'));
+  });
+
+  it('正常路径：SKYPORT_DB_PATH / SKYPORT_CHECK_TIMEOUT_MS 覆盖存储与检查默认值', () => {
+    const config = loadConfig({
+      env: { SKYPORT_DB_PATH: '/tmp/alt/skyport.db', SKYPORT_CHECK_TIMEOUT_MS: '800' },
+      configPath: absentConfigPath(),
+    });
+    expect(config.dbPath).toBe('/tmp/alt/skyport.db');
+    expect(config.checkTimeoutMs).toBe(800);
   });
 
   it('正常路径：SKYPORT_ 环境变量覆盖默认值，字符串自动强转为数字', () => {

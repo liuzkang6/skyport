@@ -3,6 +3,7 @@
  * 优先级：项目配置（skyport.config.json） > 环境变量（SKYPORT_ 前缀） > 默认值（schema 内置）。
  * 关键决定：默认值全部集中在下面 schema 里，业务代码禁止硬编码同类数值。
  */
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readJsonFileSync } from '../adapters/fs';
 import { createError, ERROR_CODES, isSkyportError } from '../errors/errors';
@@ -13,6 +14,9 @@ export const ENV_PREFIX = 'SKYPORT_';
 
 /** 项目配置文件名（约定放在项目根目录） */
 export const PROJECT_CONFIG_FILENAME = 'skyport.config.json';
+
+/** 数据目录（信任模型：目录 0700、库文件 0600，由 db 适配器负责落实） */
+export const DATA_DIR = join(homedir(), '.skyport');
 
 const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 
@@ -26,6 +30,8 @@ const configSchema = z.strictObject({
   execMaxRetries: z.coerce.number().int().min(0).max(10).default(3),
   execMaxOutputBytes: z.coerce.number().int().positive().default(100 * 1024),
   execBackoffBaseMs: z.coerce.number().int().min(0).default(200),
+  dbPath: z.string().min(1).default(join(DATA_DIR, 'skyport.db')),
+  checkTimeoutMs: z.coerce.number().int().positive().default(5_000),
 });
 
 export type SkyportConfig = z.infer<typeof configSchema>;
@@ -44,6 +50,8 @@ const ENV_KEY_TO_CONFIG_KEY: Readonly<Record<string, string>> = {
   SKYPORT_EXEC_MAX_RETRIES: 'execMaxRetries',
   SKYPORT_EXEC_MAX_OUTPUT_BYTES: 'execMaxOutputBytes',
   SKYPORT_EXEC_BACKOFF_BASE_MS: 'execBackoffBaseMs',
+  SKYPORT_DB_PATH: 'dbPath',
+  SKYPORT_CHECK_TIMEOUT_MS: 'checkTimeoutMs',
 };
 
 export function defaultProjectConfigPath(): string {

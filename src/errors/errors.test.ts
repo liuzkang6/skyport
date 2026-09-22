@@ -37,7 +37,7 @@ describe('errors 错误工厂', () => {
     const codes = Object.values(ERROR_CODES);
     expect(codes.length).toBeGreaterThan(0);
     for (const code of codes) {
-      expect(code).toMatch(/^SKYPORT_(CONFIG|EXEC|FS|NETWORK|PERMISSION)_[A-Z_]+$/);
+      expect(code).toMatch(/^SKYPORT_(CONFIG|EXEC|FS|NETWORK|PERMISSION|DB|ASSET)_[A-Z_]+$/);
     }
   });
 });
