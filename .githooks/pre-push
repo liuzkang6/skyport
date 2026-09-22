@@ -1,0 +1,3 @@
+#!/bin/sh
+# 推送前组合门禁（AGENTS.md §5 / §7）：typecheck + lint + test 全绿才允许推送
+pnpm verify
