@@ -4,8 +4,10 @@
  * 全项目只有本文件允许 process.exit。
  */
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { CommanderError, Command } from 'commander';
-import pkg from '../../package.json';
+// 版本号经 createRequire 解析：src（tsx 运行）与 dist（esbuild 产物）相对深度一致
+const pkg = createRequire(import.meta.url)('../../package.json') as { version: string };
 import { getDb } from '../adapters/db';
 import { appendLineSync } from '../adapters/fs';
 import { getConfig, loadConfig } from '../config/config';
@@ -13,6 +15,7 @@ import { isSkyportError, type SkyportError } from '../errors/errors';
 import { formatLogEntry, rootLogger, type LogSink } from '../logger/logger';
 import { runDoctor } from '../services/doctor';
 import { defaultPolicyPath, loadPolicy } from '../services/risk';
+import { backupDatabase } from '../services/backup';
 import { buildAgentCommand } from './commands/agents';
 import { buildActionCommand, buildApprovalCommands } from './commands/actions';
 import { buildAssetCommand, configureListCommand } from './commands/assets';
@@ -129,6 +132,20 @@ function buildProgram(): Command {
         ]
           .join('\n')
           .concat('\n'),
+      );
+    });
+
+  program
+    .command('backup')
+    .description('备份数据库（默认 ~/.skyport/backups，按保留份数自动清理旧备份）')
+    .option('--dir <path>', '备份目录（缺省 ~/.skyport/backups；自定义目录不动其权限）')
+    .option('--keep <n>', '保留份数（缺省取配置，默认 10）')
+    .action(async (options: { dir?: string | undefined; keep?: string | undefined }) => {
+      const keep = options.keep === undefined ? getConfig().backupKeep : Number(options.keep);
+      if (!Number.isInteger(keep) || keep < 0) throw new Error('--keep 需为非负整数');
+      const result = await backupDatabase(options.dir, keep);
+      process.stdout.write(
+        `已备份 ${result.path}（${result.bytes} 字节${result.pruned > 0 ? `，清理旧备份 ${result.pruned} 份` : ''}）\n`,
       );
     });
 

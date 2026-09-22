@@ -45,6 +45,8 @@ const configSchema = z.strictObject({
     .union([z.boolean(), z.enum(['true', 'false'])])
     .transform((value) => value === true || value === 'true')
     .default(false),
+  /** 备份保留份数（SKYPORT_BACKUP_KEEP）；skyport backup 按此清理旧备份 */
+  backupKeep: z.coerce.number().int().min(0).max(1000).default(10),
 });
 
 export type SkyportConfig = z.infer<typeof configSchema>;
@@ -69,6 +71,7 @@ const ENV_KEY_TO_CONFIG_KEY: Readonly<Record<string, string>> = {
   SKYPORT_NOTIFY_WEBHOOK_URL: 'notifyWebhookUrl',
   SKYPORT_POLICY_PATH: 'policyPath',
   SKYPORT_VERBOSE_ERRORS: 'verboseErrors',
+  SKYPORT_BACKUP_KEEP: 'backupKeep',
 };
 
 export function defaultProjectConfigPath(): string {
