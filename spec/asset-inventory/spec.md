@@ -6,7 +6,7 @@
 
 - 资产是治理的锚点：M2 起行动单的 `target` 引用资产 ID、agent 的资产范围授权也以资产为对象。
 - 资产三类型：`host`（机器）/ `cluster`（集群）/ `cloud-account`（云账户）。
-- 资产字段：`name`（全局唯一、人可读，长度 1-100）、`type`、`addr`（`host` 或 `host:port`）、`connect_mode`（local | ssh | agent；host 默认 ssh；**agent 模式 v2 开放，M1 拒绝**）、`labels`（键 `[A-Za-z0-9_.-]+` 的自由键值对）、`status`（unknown | up | down）。
+- 资产字段：`name`（全局唯一、人可读，长度 1-100）、`type`、`addr`（`[user@]host[:port]`——带 user 时 SSH 以该用户登录，省略 user 则用本机当前用户；连通性检查始终只探测 host）、`connect_mode`（local | ssh | agent；host 默认 ssh；**agent 模式 v2 开放，M1 拒绝**）、`labels`（键 `[A-Za-z0-9_.-]+` 的自由键值对）、`status`（unknown | up | down）。
 - host 必须有 addr；cluster / cloud-account 的 addr 可选。
 - **status 不是手工字段**：唯一写者是检查逻辑；`unknown` = 从未检查过。
 - 凭据不落库：库里只有地址与连接模式，连接复用本机 SSH 配置。

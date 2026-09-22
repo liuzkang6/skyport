@@ -180,6 +180,7 @@ export async function checkAsset(nameOrId: string): Promise<CheckResult> {
     });
   }
   const { host, port } = parseAddr(asset.addr, asset.connectMode);
+  // user@ 前缀只影响 SSH 登录用户，连通性检查只探测 host
   const probe = await tcpConnectCheck(host, port, getConfig().checkTimeoutMs);
   const checkedAt = new Date().toISOString();
   const status: AssetStatus = probe.ok ? 'up' : 'down';
@@ -339,9 +340,20 @@ function insertAsset(prepared: PreparedAsset): Asset {
   return asset;
 }
 
-/** addr 支持 host / host:port / [IPv6]:port；ssh 模式可省端口（默认 22），其余必须带端口 */
-export function parseAddr(addr: string, connectMode: ConnectMode | undefined): { host: string; port: number } {
-  let host = addr.trim();
+/** addr 支持 [user@]host[:port] / [user@][IPv6]:port；ssh 模式可省端口（默认 22），其余必须带端口。
+ *  user 只对 SSH 执行有意义：连通性检查永远只探测 host 部分。 */
+export function parseAddr(
+  addr: string,
+  connectMode: ConnectMode | undefined,
+): { user: string | undefined; host: string; port: number } {
+  let rest = addr.trim();
+  let user: string | undefined;
+  const at = rest.indexOf('@');
+  if (at > 0) {
+    user = rest.slice(0, at);
+    rest = rest.slice(at + 1);
+  }
+  let host = rest;
   let port: number | undefined;
   const colon = host.lastIndexOf(':');
   if (colon > 0) {
@@ -353,16 +365,16 @@ export function parseAddr(addr: string, connectMode: ConnectMode | undefined): {
     }
   }
   host = host.replace(/^\[/, '').replace(/\]$/, '');
-  if (host.length === 0) {
+  if (host.length === 0 || (user !== undefined && user.length === 0)) {
     throw createError(ERROR_CODES.ASSET_INVALID, `地址不合法: ${addr}`, { context: { addr } });
   }
   if (port === undefined) {
-    if (connectMode === 'ssh') return { host, port: DEFAULT_SSH_PORT };
+    if (connectMode === 'ssh') return { user, host, port: DEFAULT_SSH_PORT };
     throw createError(ERROR_CODES.ASSET_INVALID, `地址需含端口（host:port），ssh 模式可省略: ${addr}`, {
       context: { addr },
     });
   }
-  return { host, port };
+  return { user, host, port };
 }
 
 function rowToAsset(row: AssetRow): Asset {

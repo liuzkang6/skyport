@@ -14,6 +14,7 @@ import {
   getCheckHistory,
   importAssets,
   listAssets,
+  parseAddr,
   parseLabelPairs,
   removeAsset,
 } from './assets';
@@ -179,6 +180,17 @@ describe('assets 资产台账服务', () => {
   it('失败路径-地址缺端口且非 ssh 模式 → ASSET_INVALID；ssh 模式默认 22 可检查', async () => {
     addAsset({ name: 'no-port', type: 'host', addr: '127.0.0.1', connectMode: 'local' });
     expect(await captureAssetErrorAsync(() => checkAsset('no-port'))).toBe('SKYPORT_ASSET_INVALID');
+  });
+
+  it('地址支持 [user@]host[:port]：user 只影响 SSH 登录，检查只探测 host（parseAddr 契约）', async () => {
+    expect(parseAddr('root@10.55.30.205', 'ssh')).toEqual({ user: 'root', host: '10.55.30.205', port: 22 });
+    expect(parseAddr('liu@127.0.0.1:2222', 'local')).toEqual({ user: 'liu', host: '127.0.0.1', port: 2222 });
+    expect(parseAddr('10.0.0.1', 'ssh')).toEqual({ user: undefined, host: '10.0.0.1', port: 22 });
+    // user@ 前缀不影响检查连通性：仍按 host 探测
+    const port = await listenLocal();
+    addAsset({ name: 'user-host', type: 'host', addr: `ops@127.0.0.1:${port}`, connectMode: 'local' });
+    const result = await checkAsset('user-host');
+    expect(result.ok).toBe(true);
   });
 
   it('失败路径-目标不存在：get/check/remove → ASSET_NOT_FOUND', async () => {

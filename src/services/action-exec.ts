@@ -68,8 +68,10 @@ function buildExecSpec(action: ActionCore): ExecSpec {
       context: { actionId: action.id },
     });
   }
-  const { host, port } = parseAddr(asset.addr, asset.connectMode ?? 'ssh');
-  return { command: 'ssh', args: ['-p', String(port), '--', host, ...tokens] };
+  const { user, host, port } = parseAddr(asset.addr, asset.connectMode ?? 'ssh');
+  // 带 user@ 前缀以指定用户登录；省略 user 时 ssh 用本机当前用户（文档已注明）
+  const destination = user === undefined ? host : `${user}@${host}`;
+  return { command: 'ssh', args: ['-p', String(port), '--', destination, ...tokens] };
 }
 
 /** 执行一条已放行的行动：先落 executing + exec-started，再执行，最后落结果与终态 */
