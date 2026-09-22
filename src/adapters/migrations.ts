@@ -134,4 +134,33 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec('ALTER TABLE actions ADD COLUMN rollback TEXT;');
     },
   },
+  {
+    version: 6,
+    up: (db) => {
+      // CMDB-lite v2：服务目录 + 依赖拓扑边
+      db.exec(`
+        CREATE TABLE services (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          description TEXT,
+          owner TEXT,
+          labels TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE service_dependencies (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          service_id TEXT NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+          depends_on_service_id TEXT NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL,
+          UNIQUE(service_id, depends_on_service_id)
+        );
+        CREATE TABLE asset_services (
+          asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+          service_id TEXT NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+          PRIMARY KEY (asset_id, service_id)
+        );
+      `);
+    },
+  },
 ];
