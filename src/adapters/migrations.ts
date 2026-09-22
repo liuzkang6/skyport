@@ -100,4 +100,15 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    up: (db) => {
+      // 红队 S9/S12：执行审计补真实语义
+      db.exec(`
+        ALTER TABLE executions ADD COLUMN attempts INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE executions ADD COLUMN stdout_truncated INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE executions ADD COLUMN stderr_truncated INTEGER NOT NULL DEFAULT 0;
+      `);
+    },
+  },
 ];

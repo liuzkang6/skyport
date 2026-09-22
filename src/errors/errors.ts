@@ -75,11 +75,9 @@ export function isSkyportError(error: unknown): error is SkyportError {
   return error instanceof SkyportError;
 }
 
-/** 按错误码语义默认可重试的错误（瞬时故障）；其余默认不可重试 */
-const RETRYABLE_CODES: ReadonlySet<string> = new Set<string>([
-  ERROR_CODES.EXEC_TIMEOUT,
-  ERROR_CODES.NETWORK_TIMEOUT,
-]);
+/** 按错误码语义默认可重试的错误（瞬时故障）；其余默认不可重试。
+ * 红队 S9：EXEC_TIMEOUT 移出——超时默认不重试（非幂等命令重复执行有副作用） */
+const RETRYABLE_CODES: ReadonlySet<string> = new Set<string>([ERROR_CODES.NETWORK_TIMEOUT]);
 
 /** 错误工厂：统一补齐 retryable 缺省值，业务代码不要直接 new SkyportError */
 export function createError(

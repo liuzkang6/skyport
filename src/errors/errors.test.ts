@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { createError, ERROR_CODES, isSkyportError } from './errors';
 
 describe('errors 错误工厂', () => {
-  it('正常路径：EXEC_TIMEOUT 按错误码语义默认可重试，字段齐全', () => {
+  it('正常路径：EXEC_TIMEOUT 字段齐全；红队 S9 后默认不可重试（显式 retryOnTimeout 才重试）', () => {
     const error = createError(ERROR_CODES.EXEC_TIMEOUT, '命令执行超时');
     expect(error.type).toBe('SKYPORT_EXEC_TIMEOUT');
     expect(error.message).toBe('命令执行超时');
-    expect(error.retryable).toBe(true);
+    expect(error.retryable).toBe(false);
     expect(error.context).toEqual({});
     expect(error.name).toBe('SkyportError');
   });

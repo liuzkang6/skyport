@@ -1,10 +1,13 @@
 /**
- * 行动执行桥（M2）：把一条行动解析成本机/SSH 目标，经唯一执行器执行并落审计。
- * 执行不在 SQLite 事务里（executor 是异步的）——状态推进以事件流为准（spec 已注明）。
+ * 行动执行桥（M2/M3 + P1/S9/S10/S12 加固）：把一条行动解析成本机/SSH 目标，经唯一执行器执行并落审计。
+ * 关键决定：
+ * - 进入 executing 用原子 UPDATE 占位（红队 S10）：并发审批/竞态下只有一个进程能执行
+ * - executions 如实记录总耗时、尝试次数、输出截断标志（红队 S9/S12）
+ * - 执行不在 SQLite 事务里（executor 是异步的）——状态推进以事件流为准（spec 已注明）
  */
 import { getDb } from '../adapters/db';
 import { createError, ERROR_CODES, isSkyportError } from '../errors/errors';
-import { execute } from '../executor/executor';
+import { execute, type ExecResult } from '../executor/executor';
 import { rootLogger } from '../logger/logger';
 import { getAsset, parseAddr } from './assets';
 import { tokenizeCommand } from './risk';
@@ -26,6 +29,9 @@ export interface Execution {
   readonly exitCode: number | undefined;
   readonly timedOut: boolean;
   readonly durationMs: number;
+  readonly attempts: number;
+  readonly stdoutTruncated: boolean;
+  readonly stderrTruncated: boolean;
   readonly error: string | undefined;
   readonly createdAt: string;
 }
@@ -39,6 +45,9 @@ interface ExecutionRow {
   exit_code: number | null;
   timed_out: number;
   duration_ms: number;
+  attempts: number;
+  stdout_truncated: number;
+  stderr_truncated: number;
   error: string | null;
   created_at: string;
 }
@@ -48,7 +57,15 @@ interface ExecSpec {
   readonly args: readonly string[];
 }
 
-/** 解析执行目标：本机直接用 token[0]；SSH 走资产的 addr（支持 host:port 与 ssh config 别名） */
+/** 原子状态迁移（红队 S10）：仅当行动仍处于 from 状态时迁移到 to，返回是否抢占成功 */
+export function claimTransition(actionId: string, from: string, to: string): boolean {
+  const result = getDb()
+    .prepare('UPDATE actions SET status = ?, updated_at = ? WHERE id = ? AND status = ?')
+    .run(to, new Date().toISOString(), actionId, from);
+  return result.changes > 0;
+}
+
+/** 解析执行目标：本机直接用 token[0]；SSH 走资产的 addr（支持 user@host:port 与 ssh config 别名） */
 function buildExecSpec(action: ActionCore): ExecSpec {
   const tokens = tokenizeCommand(action.command);
   const head = tokens[0];
@@ -74,52 +91,92 @@ function buildExecSpec(action: ActionCore): ExecSpec {
   return { command: 'ssh', args: ['-p', String(port), '--', destination, ...tokens] };
 }
 
-/** 执行一条已放行的行动：先落 executing + exec-started，再执行，最后落结果与终态 */
+/** 执行一条已放行的行动：原子占位 executing → 执行 → 落结果与终态 */
 export async function executeAction(
   action: ActionCore,
   actor: { readonly type: 'human' | 'agent'; readonly id: string },
 ): Promise<Execution> {
-  setActionStatus(action.id, 'executing');
+  if (!claimTransition(action.id, 'approved', 'executing')) {
+    const row = getDb().prepare('SELECT status FROM actions WHERE id = ?').get(action.id) as
+      | { status: string }
+      | undefined;
+    throw createError(
+      ERROR_CODES.ACTION_INVALID_STATE,
+      `行动 ${action.id} 当前状态为 ${row?.status ?? '未知'}，不能执行（应为 approved）`,
+      { context: { actionId: action.id, status: row?.status ?? 'unknown' } },
+    );
+  }
   insertEvent(action.id, 'exec-started', actor);
   let stdout = '';
   let stderr = '';
   let exitCode: number | undefined;
   let timedOut = false;
   let durationMs = 0;
+  let attempts = 1;
+  let stdoutTruncated = false;
+  let stderrTruncated = false;
   let errorMessage: string | undefined;
   let ok = false;
   try {
     const spec = buildExecSpec(action);
-    const result = await execute(spec.command, spec.args);
+    const result: ExecResult = await execute(spec.command, spec.args);
     ok = true;
     stdout = result.stdout;
     stderr = result.stderr;
     exitCode = result.exitCode;
     durationMs = result.durationMs;
+    attempts = result.attempts;
+    stdoutTruncated = result.stdoutTruncated;
+    stderrTruncated = result.stderrTruncated;
   } catch (error) {
     if (isSkyportError(error)) {
-      errorMessage = `${error.type}: ${error.message}`;
+      errorMessage = error.message;
       timedOut = error.type === ERROR_CODES.EXEC_TIMEOUT;
-      const recorded = error.context.exitCode;
-      exitCode = typeof recorded === 'number' ? recorded : undefined;
+      const recordedExit = error.context.exitCode;
+      exitCode = typeof recordedExit === 'number' ? recordedExit : undefined;
       const recordedStderr = error.context.stderr;
       if (typeof recordedStderr === 'string') stderr = recordedStderr;
+      const recordedDuration = error.context.durationMs;
+      durationMs = typeof recordedDuration === 'number' ? recordedDuration : 0;
+      const recordedAttempts = error.context.attempts;
+      attempts = typeof recordedAttempts === 'number' ? recordedAttempts : 1;
+      stdoutTruncated = error.context.stdoutTruncated === true;
+      stderrTruncated = error.context.stderrTruncated === true;
     } else if (error instanceof Error) {
       errorMessage = error.message;
     } else {
       errorMessage = String(error);
     }
-    rootLogger.warn('行动执行失败', { actionId: action.id, error: errorMessage });
+    rootLogger.warn('行动执行失败', { actionId: action.id, error: errorMessage, attempts });
   }
   const now = new Date().toISOString();
   const insert = getDb()
     .prepare(
-      `INSERT INTO executions (action_id, ok, stdout, stderr, exit_code, timed_out, duration_ms, error, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO executions (action_id, ok, stdout, stderr, exit_code, timed_out, duration_ms, attempts, stdout_truncated, stderr_truncated, error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(action.id, ok ? 1 : 0, stdout, stderr, exitCode ?? null, timedOut ? 1 : 0, durationMs, errorMessage ?? null, now);
-  setActionStatus(action.id, ok ? 'success' : 'failed');
-  insertEvent(action.id, 'exec-finished', actor, { ok, exitCode: exitCode ?? null, durationMs, timedOut });
+    .run(
+      action.id,
+      ok ? 1 : 0,
+      stdout,
+      stderr,
+      exitCode ?? null,
+      timedOut ? 1 : 0,
+      durationMs,
+      attempts,
+      stdoutTruncated ? 1 : 0,
+      stderrTruncated ? 1 : 0,
+      errorMessage ?? null,
+      now,
+    );
+  claimTransition(action.id, 'executing', ok ? 'success' : 'failed');
+  insertEvent(action.id, 'exec-finished', actor, {
+    ok,
+    exitCode: exitCode ?? null,
+    durationMs,
+    attempts,
+    timedOut,
+  });
   return {
     id: Number(insert.lastInsertRowid),
     actionId: action.id,
@@ -129,6 +186,9 @@ export async function executeAction(
     exitCode,
     timedOut,
     durationMs,
+    attempts,
+    stdoutTruncated,
+    stderrTruncated,
     error: errorMessage,
     createdAt: now,
   };
@@ -152,15 +212,12 @@ function rowToExecution(row: ExecutionRow): Execution {
     exitCode: row.exit_code ?? undefined,
     timedOut: row.timed_out === 1,
     durationMs: row.duration_ms,
+    attempts: row.attempts,
+    stdoutTruncated: row.stdout_truncated === 1,
+    stderrTruncated: row.stderr_truncated === 1,
     error: row.error ?? undefined,
     createdAt: row.created_at,
   };
-}
-
-function setActionStatus(actionId: string, status: string): void {
-  getDb()
-    .prepare('UPDATE actions SET status = ?, updated_at = ? WHERE id = ?')
-    .run(status, new Date().toISOString(), actionId);
 }
 
 /** 事件只增不改：状态迁移的审计源 */
