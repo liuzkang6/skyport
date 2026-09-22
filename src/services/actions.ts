@@ -43,6 +43,7 @@ export interface Action {
   readonly targetName: string;
   readonly targetKind: 'local' | 'ssh';
   readonly reason: string | undefined;
+  readonly rollback: string | undefined;
   readonly riskLevel: RiskLevel;
   readonly riskSource: string;
   readonly status: ActionStatus;
@@ -65,6 +66,8 @@ export interface CreateActionInput {
   readonly target?: string | undefined;
   readonly reason?: string | undefined;
   readonly riskHint?: RiskLevel | undefined;
+  readonly rollback?: string | undefined;
+  readonly dryRun?: boolean | undefined;
 }
 
 export interface ListActionsFilter {
@@ -99,6 +102,37 @@ export async function createAction(input: CreateActionInput): Promise<ActionResu
   }
   const policy = loadPolicy();
   const assessment = applyHint(assessRisk(command, policy), input.riskHint);
+
+  // 红队护栏：high 风险行动必须提供回滚声明（spec/guardrails）
+  if (assessment.level === 'high' && input.rollback === undefined && input.dryRun !== true) {
+    throw createError(ERROR_CODES.ACTION_INVALID, 'high 风险行动必须提供 --rollback 回滚声明', {
+      context: { command, risk: assessment.level },
+    });
+  }
+
+  // dry-run：只评级展示，不落库不执行（spec/guardrails）
+  if (input.dryRun === true) {
+    return {
+      action: {
+        id: 'dry-run',
+        command,
+        targetAssetId: undefined,
+        targetName: input.target ?? 'local',
+        targetKind: 'local',
+        reason: input.reason,
+        rollback: input.rollback,
+        riskLevel: assessment.level,
+        riskSource: assessment.source,
+        status: 'pending',
+        actorType: input.actor.type,
+        actorId: input.actor.id,
+        actorName: input.actor.name,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      execution: undefined,
+    };
+  }
 
   // 目标解析：缺省本机；云账户不可作为执行目标；目标连接模式跟随资产登记
   let targetAssetId: string | undefined;
@@ -138,6 +172,7 @@ export async function createAction(input: CreateActionInput): Promise<ActionResu
     targetName,
     targetKind,
     reason: input.reason,
+    rollback: input.rollback,
     riskLevel: assessment.level,
     riskSource: assessment.source,
     status: 'pending',
@@ -150,7 +185,7 @@ export async function createAction(input: CreateActionInput): Promise<ActionResu
   getDb()
     .prepare(
       `INSERT INTO actions (id, command, target_asset_id, target_name, target_kind, reason, risk_level, risk_source, status, actor_type, actor_id, created_at, updated_at)
-       VALUES (@id, @command, @targetAssetId, @targetName, @targetKind, @reason, @riskLevel, @riskSource, 'pending', @actorType, @actorId, @createdAt, @updatedAt)`,
+       VALUES (@id, @command, @targetAssetId, @targetName, @targetKind, @reason, @rollback, @riskLevel, @riskSource, 'pending', @actorType, @actorId, @createdAt, @updatedAt)`,
     )
     .run({
       id: action.id,
@@ -159,6 +194,7 @@ export async function createAction(input: CreateActionInput): Promise<ActionResu
       targetName: action.targetName,
       targetKind: action.targetKind,
       reason: action.reason ?? null,
+      rollback: action.rollback ?? null,
       riskLevel: action.riskLevel,
       riskSource: action.riskSource,
       actorType: action.actorType,
@@ -195,6 +231,8 @@ export async function createAction(input: CreateActionInput): Promise<ActionResu
 export async function approveAction(actionId: string, actor: ActorRef): Promise<ActionResult> {
   requireHuman(actor, 'approve');
   const action = getAction(actionId);
+  // 红队护栏：pending 超 24h 自动作废（spec/guardrails）
+  expireStalePending(action);
   if (!claimTransition(actionId, 'pending', 'approved')) {
     throw invalidStateError(actionId, 'approve');
   }
@@ -267,6 +305,19 @@ export async function waitForTerminal(actionId: string, waitMs: number): Promise
     if (isTerminal(action.status)) return { action, execution: getLastExecution(actionId) };
   }
   return { action: getAction(actionId), execution: getLastExecution(actionId) };
+}
+
+const PENDING_EXPIRY_HOURS = 24;
+
+/** pending 超 24h 自动作废（防止积压旧待办在环境变化后被误批） */
+function expireStalePending(action: Action): void {
+  if (action.status !== 'pending') return;
+  const ageMs = Date.now() - Date.parse(action.createdAt);
+  if (ageMs > PENDING_EXPIRY_HOURS * 3_600_000) {
+    claimTransition(action.id, 'pending', 'cancelled');
+    getDb().prepare('INSERT INTO action_events (action_id, event, actor_type, actor_id, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(action.id, 'expired', 'system', 'system', JSON.stringify({ reason: 'pending 超 24h 自动作废' }), new Date().toISOString());
+    throw createError(ERROR_CODES.ACTION_INVALID_STATE, `行动 ${action.id} 已过期（pending 超 ${PENDING_EXPIRY_HOURS}h），自动作废`, { context: { actionId: action.id, ageHours: Math.round(ageMs / 3_600_000) } });
+  }
 }
 
 function invalidStateError(actionId: string, operation: string): Error {

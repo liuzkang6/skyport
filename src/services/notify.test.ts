@@ -23,6 +23,7 @@ function sampleAction(overrides: Partial<Action> = {}): Action {
     targetName: 'local',
     targetKind: 'local',
     reason: '演练',
+    rollback: undefined,
     riskLevel: 'medium',
     riskSource: 'builtin-rule',
     status: 'pending',

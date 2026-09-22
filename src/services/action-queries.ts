@@ -24,6 +24,7 @@ interface ActionRow {
   target_name: string;
   target_kind: string;
   reason: string | null;
+  rollback: string | null;
   risk_level: string;
   risk_source: string;
   status: string;
@@ -119,6 +120,7 @@ function rowToAction(row: ActionRow): Action {
     targetName: row.target_name,
     targetKind: row.target_kind as 'local' | 'ssh',
     reason: row.reason ?? undefined,
+    rollback: row.rollback ?? undefined,
     riskLevel: row.risk_level as RiskLevel,
     riskSource: row.risk_source,
     status: row.status as ActionStatus,

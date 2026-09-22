@@ -127,4 +127,11 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    up: (db) => {
+      // 高危护栏（spec/guardrails）：回滚声明 + dry-run 支持
+      db.exec('ALTER TABLE actions ADD COLUMN rollback TEXT;');
+    },
+  },
 ];

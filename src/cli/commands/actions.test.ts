@@ -12,6 +12,7 @@ function resultWithStatus(status: string): ActionResult {
       targetName: 'local',
       targetKind: 'local',
       reason: undefined,
+      rollback: undefined,
       riskLevel: 'low',
       riskSource: 'default-low',
       status: status as ActionResult['action']['status'],
