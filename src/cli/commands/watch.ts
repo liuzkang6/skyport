@@ -6,7 +6,8 @@
 import { Command } from 'commander';
 import { isCancel, select } from '@clack/prompts';
 import { getConfig } from '../../config/config';
-import { approveAction, getActionEvents, rejectAction, type Action } from '../../services/actions';
+import { approveAction, rejectAction, type Action } from '../../services/actions';
+import { getActionEvents } from '../../services/action-queries';
 import { getLastExecution } from '../../services/action-exec';
 import { requireHumanActor } from '../../services/agents';
 import { pollPending } from '../../services/watch';

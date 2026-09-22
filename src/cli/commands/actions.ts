@@ -10,14 +10,12 @@ import {
   approveAction,
   cancelAction,
   createAction,
-  getAction,
-  getActionEvents,
-  listActions,
   rejectAction,
   runDirect,
   type ActionResult,
   type ActionStatus,
 } from '../../services/actions';
+import { getAction, getActionEvents, listActions } from '../../services/action-queries';
 import { getLastExecution } from '../../services/action-exec';
 import { RISK_LEVELS, type RiskLevel } from '../../services/risk';
 import { createError, ERROR_CODES, isSkyportError } from '../../errors/errors';

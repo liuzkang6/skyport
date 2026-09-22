@@ -10,13 +10,11 @@ import {
   approveAction,
   cancelAction,
   createAction,
-  getAction,
-  getActionEvents,
   agentRun,
-  listActions,
   rejectAction,
   runDirect,
 } from './actions';
+import { getAction, getActionEvents, listActions } from './action-queries';
 import { createAgent, humanUserId, type ActorRef } from './agents';
 
 let tempDir: string;

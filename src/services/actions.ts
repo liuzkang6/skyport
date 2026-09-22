@@ -1,19 +1,17 @@
 /**
  * 行动服务（M2，spec/governance-loop/spec.md）：登记 / 审批 / 拒绝 / 取消 / 直通 / agent 一站式。
  * 治理红线：approve / reject / cancel / run 只允许 human actor；agent 走 create 与 agent run。
+ * 查询与事件流在 action-queries.ts；跳板范围校验在 pivot.ts（单文件 ≤400 行规矩）。
  */
 import { randomBytes } from 'node:crypto';
 import { getDb } from '../adapters/db';
 import { createError, ERROR_CODES } from '../errors/errors';
-import {
-  assertAgentMayCreateAction,
-  getAgent,
-  globMatch,
-  type ActorRef,
-} from './agents';
+import { assertAgentMayCreateAction, getAgent, type ActorRef } from './agents';
 import { executeAction, claimTransition, insertEvent, getLastExecution, type Execution } from './action-exec';
+import { getAction } from './action-queries';
 import { notifyPendingAction } from './notify';
-import { getAsset, listAssets, parseAddr, type Asset } from './assets';
+import { getAsset } from './assets';
+import { assertPivotScope } from './pivot';
 import {
   applyHint,
   assessRisk,
@@ -56,15 +54,6 @@ export interface Action {
   readonly updatedAt: string;
 }
 
-export interface ActionEvent {
-  readonly id: number;
-  readonly event: string;
-  readonly actorType: 'human' | 'agent';
-  readonly actorId: string;
-  readonly detail: string | undefined;
-  readonly createdAt: string;
-}
-
 export interface ActionResult {
   readonly action: Action;
   readonly execution: Execution | undefined;
@@ -78,34 +67,21 @@ export interface CreateActionInput {
   readonly riskHint?: RiskLevel | undefined;
 }
 
-interface ActionRow {
-  id: string;
-  command: string;
-  target_asset_id: string | null;
-  target_name: string;
-  target_kind: string;
-  reason: string | null;
-  risk_level: string;
-  risk_source: string;
-  status: string;
-  actor_type: string;
-  actor_id: string;
-  actor_name: string | null;
-  created_at: string;
-  updated_at: string;
+export interface ListActionsFilter {
+  readonly status?: ActionStatus | undefined;
+  /** agent 名字或 ID；也可以是 human 用户名（红队 U5） */
+  readonly actor?: string | undefined;
+  readonly target?: string | undefined;
+  /** ISO 时间：只看此之后的行动 */
+  readonly since?: string | undefined;
+  readonly limit?: number | undefined;
+  readonly offset?: number | undefined;
 }
 
-/** 行动查询统一带 agent 名字（红队 U2：发起者不显示内部 ID） */
-const ACTION_SELECT =
-  'SELECT a.*, g.name AS actor_name FROM actions a LEFT JOIN agents g ON a.actor_type = \'agent\' AND a.actor_id = g.id';
-
-interface EventRow {
-  id: number;
-  event: string;
-  actor_type: string;
-  actor_id: string;
-  detail: string | null;
-  created_at: string;
+export interface ActionPage {
+  readonly actions: readonly Action[];
+  /** 还有更早的记录未展示（达到页大小） */
+  readonly hasMore: boolean;
 }
 
 /** 登记行动：校验 → 风险评估 → agent 三件套 → 入库 pending →（低危+策略允许）自动批准执行 */
@@ -293,87 +269,6 @@ export async function waitForTerminal(actionId: string, waitMs: number): Promise
   return { action: getAction(actionId), execution: getLastExecution(actionId) };
 }
 
-export interface ListActionsFilter {
-  readonly status?: ActionStatus | undefined;
-  /** agent 名字或 ID；也可以是 human 用户名（红队 U5） */
-  readonly actor?: string | undefined;
-  readonly target?: string | undefined;
-  /** ISO 时间：只看此之后的行动 */
-  readonly since?: string | undefined;
-  readonly limit?: number | undefined;
-  readonly offset?: number | undefined;
-}
-
-export interface ActionPage {
-  readonly actions: readonly Action[];
-  /** 还有更早的记录未展示（达到页大小） */
-  readonly hasMore: boolean;
-}
-
-const DEFAULT_PAGE_SIZE = 200;
-
-export function listActions(filter: ListActionsFilter = {}): ActionPage {
-  const conditions: string[] = [];
-  const params: Record<string, string | number> = {};
-  if (filter.status !== undefined) {
-    conditions.push('a.status = @status');
-    params.status = filter.status;
-  }
-  if (filter.target !== undefined) {
-    conditions.push('a.target_name = @target');
-    params.target = filter.target;
-  }
-  if (filter.since !== undefined) {
-    conditions.push('a.created_at >= @since');
-    params.since = filter.since;
-  }
-  if (filter.actor !== undefined) {
-    // 名字优先解析成 agent id；解析不了按原值匹配（human 用户名或直接传 agent id）
-    let actorKey = filter.actor;
-    try {
-      actorKey = getAgent(filter.actor).id;
-    } catch {
-      // 保持原值
-    }
-    conditions.push(
-      "((a.actor_type = 'agent' AND a.actor_id = @actor) OR (a.actor_type = 'human' AND a.actor_id = @actorHuman))",
-    );
-    params.actor = actorKey;
-    params.actorHuman = filter.actor;
-  }
-  const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
-  const limit = filter.limit ?? DEFAULT_PAGE_SIZE;
-  const offset = filter.offset ?? 0;
-  const rows = getDb()
-    .prepare(`${ACTION_SELECT}${where} ORDER BY a.created_at DESC LIMIT @limit OFFSET @offset`)
-    .all({ ...params, limit: limit + 1, offset }) as ActionRow[];
-  const hasMore = rows.length > limit;
-  return { actions: rows.slice(0, limit).map(rowToAction), hasMore };
-}
-
-export function getAction(actionId: string): Action {
-  const row = getDb().prepare(`${ACTION_SELECT} WHERE a.id = ?`).get(actionId) as ActionRow | undefined;
-  if (row === undefined) {
-    throw createError(ERROR_CODES.ACTION_NOT_FOUND, `行动不存在: ${actionId}`, { context: { actionId } });
-  }
-  return rowToAction(row);
-}
-
-export function getActionEvents(actionId: string): ActionEvent[] {
-  getAction(actionId); // 不存在则 404 语义
-  const rows = getDb()
-    .prepare('SELECT * FROM action_events WHERE action_id = ? ORDER BY id ASC')
-    .all(actionId) as EventRow[];
-  return rows.map((row) => ({
-    id: row.id,
-    event: row.event,
-    actorType: row.actor_type as 'human' | 'agent',
-    actorId: row.actor_id,
-    detail: row.detail ?? undefined,
-    createdAt: row.created_at,
-  }));
-}
-
 function invalidStateError(actionId: string, operation: string): Error {
   const current = getAction(actionId);
   return createError(
@@ -389,61 +284,12 @@ function requireHuman(actor: ActorRef, operation: string): void {
   }
 }
 
-/** 二级目标解析：跳板主机名对应哪台已登记资产（按名字或地址主机部分） */
-function findAssetByTarget(target: string): Asset | undefined {
-  const all = listAssets();
-  const byName = all.find((asset) => asset.name === target);
-  if (byName !== undefined) return byName;
-  return all.find((asset) => {
-    if (asset.addr === undefined) return false;
-    try {
-      return parseAddr(asset.addr, asset.connectMode).host === target;
-    } catch {
-      return false;
-    }
-  });
-}
-
-/** 人是 root 不做范围校验（风险地板仍由引擎给出）；agent 的跳板必须在授权资产范围内 */
-function assertPivotScope(actor: ActorRef, pivots: readonly string[]): void {
-  if (actor.type !== 'agent') return;
-  const agent = getAgent(actor.id);
-  for (const pivot of pivots) {
-    const asset = findAssetByTarget(pivot);
-    if (asset === undefined) continue; // 未登记主机：引擎已给 ≥medium，高危靠风险上限兜底
-    if (!agent.assetPatterns.some((pattern) => globMatch(pattern, asset.name))) {
-      throw createError(ERROR_CODES.PERMISSION_DENIED, `命令内嵌跳板目标不在 agent 资产授权范围: ${pivot}`, {
-        context: { agent: agent.name, pivot, patterns: agent.assetPatterns },
-      });
-    }
-  }
-}
-
 function isTerminal(status: ActionStatus): boolean {
   return TERMINAL_STATUSES.has(status);
 }
 
 function reasonInvalid(reason: string | undefined): boolean {
   return reason !== undefined && reason.length > REASON_MAX_LENGTH;
-}
-
-function rowToAction(row: ActionRow): Action {
-  return {
-    id: row.id,
-    command: row.command,
-    targetAssetId: row.target_asset_id ?? undefined,
-    targetName: row.target_name,
-    targetKind: row.target_kind as 'local' | 'ssh',
-    reason: row.reason ?? undefined,
-    riskLevel: row.risk_level as RiskLevel,
-    riskSource: row.risk_source,
-    status: row.status as ActionStatus,
-    actorType: row.actor_type as 'human' | 'agent',
-    actorId: row.actor_id,
-    actorName: row.actor_name ?? undefined,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
 }
 
 function sleep(ms: number): Promise<void> {

@@ -2,7 +2,8 @@
  * watch 值守服务（M3）：轮询 pending 行动并计算"新出现的/已离场的"两类增量。
  * CLI 层负责节奏与展示；这里保持纯数据语义，便于单测。
  */
-import { listActions, getAction, type Action, type ActionStatus } from './actions';
+import { getAction, listActions } from './action-queries';
+import type { Action, ActionStatus } from './actions';
 
 export interface PendingDiff {
   /** 新出现的 pending（需要提醒） */

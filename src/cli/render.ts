@@ -3,7 +3,8 @@
  * 颜色仅在 stdout 是终端时启用（管道/重定向输出纯文本，保证可 grep）。
  */
 import type { IssuedAgent, Agent } from '../services/agents';
-import type { Action, ActionEvent, ActionResult } from '../services/actions';
+import type { Action, ActionResult } from '../services/actions';
+import type { ActionEvent } from '../services/action-queries';
 import type { Execution } from '../services/action-exec';
 import type { Asset, AssetCheck, AssetType, CheckResult, ImportSummary } from '../services/assets';
 
