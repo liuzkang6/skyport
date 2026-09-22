@@ -93,11 +93,6 @@ function warnOnce(message: string): void {
   rootLogger.warn(message);
 }
 
-/** 进程内重置告警去重（测试用） */
-export function resetRiskWarnings(): void {
-  warned = new Set<string>();
-}
-
 // ── 内置规则表 ─────────────────────────────────────────────────────────────
 
 const SHELL_PROGRAMS = new Set(['sh', 'bash', 'dash', 'zsh', 'ksh', 'fish']);

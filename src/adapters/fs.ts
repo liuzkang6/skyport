@@ -4,7 +4,7 @@
  * 所有底层异常统一归一化为 SKYPORT_FS_* / SKYPORT_PERMISSION_* 错误码再上抛。
  */
 import { appendFileSync, chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { appendFile, readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { createError, ERROR_CODES, type SkyportError } from '../errors/errors';
 
 type FsAction = 'read' | 'write';
@@ -47,14 +47,6 @@ export async function readFileUtf8(path: string): Promise<string> {
 export async function writeFileUtf8(path: string, data: string): Promise<void> {
   try {
     await writeFile(path, data, 'utf8');
-  } catch (error) {
-    throw normalizeFsError(path, 'write', error);
-  }
-}
-
-export async function appendFileUtf8(path: string, data: string): Promise<void> {
-  try {
-    await appendFile(path, data, 'utf8');
   } catch (error) {
     throw normalizeFsError(path, 'write', error);
   }

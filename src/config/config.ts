@@ -10,9 +10,6 @@ import { createError, ERROR_CODES, isSkyportError } from '../errors/errors';
 import { translateIssues } from '../errors/messages';
 import { z } from 'zod';
 
-/** 环境变量统一前缀（skyport_ 的大写形式） */
-export const ENV_PREFIX = 'SKYPORT_';
-
 /** 项目配置文件名（约定放在项目根目录） */
 export const PROJECT_CONFIG_FILENAME = 'skyport.config.json';
 
@@ -20,8 +17,6 @@ export const PROJECT_CONFIG_FILENAME = 'skyport.config.json';
 export const DATA_DIR = join(homedir(), '.skyport');
 
 const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
-
-export type LogLevelName = (typeof LOG_LEVELS)[number];
 
 /** strictObject：出现未知键直接报错，防止配置文件里拼错键名后静默失效 */
 const configSchema = z.strictObject({
