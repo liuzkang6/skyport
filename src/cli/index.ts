@@ -185,8 +185,12 @@ async function bootstrap(): Promise<number> {
   return EXIT_OK;
 }
 
+// 红队 N1：管道写是异步的，process.exit 会丢弃未冲刷的 stdout 缓冲（管道下 --json 恰好断在 64KiB）。
+// 改用 exitCode 让 Node 事件循环自然退出，保证全部输出先落盘/落管道。
 bootstrap()
-  .then((exitCode) => process.exit(exitCode))
+  .then((exitCode) => {
+    process.exitCode = exitCode;
+  })
   .catch((error: unknown) => {
     // 红队 S15：commander 用法错误是人手滑不是故障，只留 commander 自己的输出，不记 ERROR
     if (!(error instanceof CommanderError)) {
@@ -194,5 +198,5 @@ bootstrap()
     }
     const text = formatErrorForCli(error);
     if (text !== '') process.stderr.write(`${text}\n`);
-    process.exit(exitCodeForError(error));
+    process.exitCode = exitCodeForError(error);
   });
