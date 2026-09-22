@@ -66,8 +66,10 @@
 - 超长：命令 > 2000 字符、reason > 500 → `ACTION_INVALID`
 - 权限不足：三件套任一不满足 / key 无效或状态不 active / 到期 / 审批类操作带 key → `PERMISSION_DENIED`
 - 不存在：目标资产 / 行动 / agent → `ASSET_NOT_FOUND` / `ACTION_NOT_FOUND` / `AGENT_NOT_FOUND`
-- 状态冲突：对非 pending 行动 approve/reject/cancel → `ACTION_INVALID_STATE`
-- 超时：执行超时 → 行动 failed + executions.timed_out=1 + 错误码归一化（EXEC_TIMEOUT 语义）
+- 状态冲突：对非 pending 行动 approve/reject/cancel → `ACTION_INVALID_STATE`；**状态迁移全部原子**（`UPDATE ... WHERE status = <from>`，影响行数 0 即冲突），并发审批只有一个成功（红队 S10）
+- 超时：执行超时 → 行动 failed + executions.timed_out=1；**超时默认不重试**（非幂等命令重复执行有副作用），显式 `retryOnTimeout` 才退避重试；executions 如实记录**总耗时与尝试次数**（红队 S9）
+- 执行失败退出码：行动终态 failed 时 approve/run/agent run 的 CLI 退出码为 4（exec 域）；批量操作保留最重要失败的域码，不出现"未知错误"（红队 S7/S8）
 - 断网语义：SSH 不可达 / 命令不存在 → 行动 failed，stderr/错误留痕（行动失败是数据，命令退出码按域映射）
 - 策略文件非法（坏 JSON / 字段类型错）→ `CONFIG_INVALID`；文件不存在 → 用默认策略
-- 并发：单进程 CLI 顺序执行；多进程同库由 SQLite 锁兜底（busy → `DB_QUERY_FAILED`）；执行不在 SQLite 事务内（异步），状态以事件流为准
+- 并发：状态迁移靠原子 UPDATE 兜底；执行不在 SQLite 事务内（异步），状态以事件流为准
+- 存储：executions 记录尝试次数与 stdout/stderr 截断标志（迁移 v3，红队 S12）

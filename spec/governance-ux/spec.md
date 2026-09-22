@@ -11,10 +11,23 @@
 - **失败不阻断治理**：发送失败/非 2xx 只记 WARN 日志，行动照常创建；超时 5s。
 - 只在创建时通知一次：approve/reject 产生的状态变化不重复通知（v2 再考虑结果回推）。
 
-### watch 前台值守
-- `skyport watch [--interval 秒=3] [--once]`：轮询 pending 行动；新 pending → 输出 + 终端铃（\x07）；已见行动离开 pending → 输出其终态（approved 执行结果 / rejected / cancelled）。
-- `--once`：单次巡检后退出（给 cron/脚本用），不响铃。
-- Ctrl+C 干净退出（退出码 0）；非 TTY 环境照常工作（纯文本输出）。
+### watch 前台值守（P2 加固后）
+- `skyport watch [--interval 秒=3] [--once] [--no-interactive]`：轮询 pending 行动；新 pending → 输出 + 终端铃（\x07）；已见行动离开 pending → 输出其终态。
+- **值守行显示完整决策要素（红队 U1/U2/U3）**：风险、发起者（agent 名字而非内部 ID）、目标、命令（截断必提示 show 看全文）、**理由**；与 `action list` 共用同一渲染函数保证一致。
+- **就地审批（红队 U4）**：终端环境默认交互——新待办出现后方向键选择 批准/否决/详情/跳过；`--no-interactive` 或非 TTY 自动退化为纯播报。
+- `--once`：单次巡检后退出（给 cron/脚本用），不响铃、不交互。
+- Ctrl+C 干净退出（退出码 0）。
+
+### 行动台账（红队 U5）
+- `action list` 支持 `--agent <名|ID>` / `--target <资产名>` / `--since <ISO>` / `--limit` / `--offset` 过滤分页；达到页大小时尾部提示"仅显示最近 N 条，用过滤条件缩小范围"。
+- 发起者一律显示 agent 名字（已删除/吊销的回退显示 ID）。
+
+### agent run 等待体验（红队 U6/U7）
+- 进入等待**立即打印**登记结果与"等待人工审批（最长 Ns）"提示，不静默挂住。
+- approve/run 执行前打印"执行中"阶段提示（慢命令不再干等无输出）。
+
+### key 读取（红队 S11）
+- 支持 `--api-key-file <路径>`（从文件读 key，避免 argv 泄露）；推荐顺序：`SKYPORT_API_KEY` 环境变量 > `--api-key-file` > `--api-key`（argv，最不安全）。
 
 ### 交互式选择（list --select）
 - `skyport list --select`：终端内方向键选资产 → 显示该资产详情与检查历史，可连续选择，取消退出。
