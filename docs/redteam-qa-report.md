@@ -1,0 +1,290 @@
+# skyport 红队 QA 审查报告（安全 + 人机体验）
+
+> **交付对象**：开发 Agent / 开发同学。本文档自包含，可直接按问题 ID 逐条修复。
+> **被测版本**：skyport v0.1.0（M3），仓库 `/home/liu/skyport`，DB `~/.skyport/skyport.db`。
+> **测试日期**：2026-09-22。测试依据：`docs/redteam-test-plan.md` 全部用例（A–G）+ 攻击者模式扩展 + 值守运维人机体验专项。
+> **测试环境说明**：本机默认 node 为 v18.19.1，CLI 无法启动（见 S1），全部测试使用 `~/node22/bin/node`（v22.14.0）经 `bin/skyport.mjs` 执行。
+> **测试后状态**：环境已还原——测试 agent 全部吊销（redteam/lowagent/exp/autoexec/opdemo），测试资产已删除（资产清单回到 t1/t2/t3），121+ 条 pending 已全部 **reject**（危险命令未执行过任何一条），被篡改的 `docs/` 目录权限已恢复 775。
+
+---
+
+## 一、执行摘要
+
+治理闭环骨架真实有效：认证/三件套门口校验/审批人专属/参数数组执行/审计留痕全部按主张工作（A1–A6、B1–B5、D4、E1、E2、E3、G1、G2 通过）。
+
+但红队主线结论是：**存在一条不需要任何漏洞利用技巧的"零审批 root 直通"链路（S2）**——风险引擎可被平凡变形绕过（S3）+ 策略文件从 cwd 加载 + `autoExecLowRisk` 开启，三者组合即可让 **low 上限的受限 agent** 免审批在资产上以 root 执行删除类命令。测试计划第六节的安全主张（"即便骗过，仍有身份、上限、留痕，高危必须过人"）在默认配置下成立，在此链路下被整体击穿。
+
+人机体验结论：核心闭环可用，approve 内联反馈是亮点；但值守审批场景（系统安全兜底依赖的"人眼环节"）体验最薄——看板截断命令、值守屏不显示理由、发起者只给内部 ID、不能就地审批。
+
+**修复优先级总览**：
+
+| 优先级 | 问题 | 一句话 |
+| --- | --- | --- |
+| P0（发布阻断） | S2, S3, S4 | 拆掉零审批直通链 + 修风险引擎变形绕过 + 堵资产穿透 |
+| P0.5 | S1 | node<20 时人话报错而非裸崩 |
+| P1 | S5, S6, S7, S8, S9 | 文件系统副作用 / 凭据出站 / 退出码契约 / 超时重试 |
+| P2 | S10–S15, U1–U6 | 竞态窗口、凭据可见性、审计标记、值守体验 |
+| P3 | U7, U8 | 体验打磨 |
+
+---
+
+## 二、通过项记录（不需要动作，供回归基线）
+
+| 组 | 结果 |
+| --- | --- |
+| A1–A6 认证 | 全过：无效 key/暂停/过期/吊销均 exit 7 且不可恢复；`SKYPORT_API_KEY` 带 key 审批被拒；DB 只存 64 位 hex 哈希，无明文 |
+| B1–B5 越权 | 全过：风险超限/资产出界/local 语义/risk-hint 只升不降/agent key 调 `run` 被拒，均 exit 7 |
+| C1/C8 基线 | `rm -rf /`、`dd`、`mkfs`、`shutdown`、`rm --recursive --force /` 判 high 正常 |
+| D1/D2/D4 状态机 | 重复 approve/cancel 后 approve 被状态机拒绝；`--wait-seconds` 到点如实返回 pending 不挂死 |
+| D3 并发审批 | 3 轮 × 5 进程并发 approve：无双执行（但理论窗口存在，见 S10） |
+| E1 addr 注入 | `--` + 单 argv 防线有效：`root@1.2.3.4 -oProxyCommand=evil` 被整体当主机名，ssh exit 255，ProxyCommand 未被解析 |
+| E2 本地注入 | 本地不经 shell：`;` `\|` `` ` `` `$()` 原样传给目标程序，无解释 |
+| E3 输出截断 | 20MB 输出截为恰好 102400 字节，行动 success |
+| F1 文件权限 | `~/.skyport` 700 / db 600（-shm/-wal 同样 600） |
+| G1/G2 韧性 | 连续 100 条 pending 创建/列表不卡不死；6 进程并发写库全部成功，无 BUSY 崩溃 |
+| 输入健壮性 | 空输入/纯空白/未闭合引号/2000 边界/超长名字/非法日期/非法枚举/坏 DB 路径，均有干净中文报错与正确退出码；webhook 指向黑洞地址不阻塞（0.79s 返回）；资产检查黑洞 5s 精确超时、DNS 失败快速报错；重复 init 幂等 |
+
+---
+
+## 三、安全问题清单
+
+> 每条格式：严重度 / 场景 / 期望 / 实际 / 复现步骤 / 定位与修复建议。
+
+### S1〔阻断〕node < 20 时 CLI 裸崩，首次使用即卡死
+
+- **场景**：在 PATH 默认 node 为 18 的机器上执行 `node bin/skyport.mjs doctor`（首次使用按文档走查）
+- **期望**：人话报错"node 版本过低，需 ≥ 20"，exit 2
+- **实际**：`SyntaxError: The requested module 'node:util' does not provide an export named 'styleText'` + 12 行堆栈，exit 1。bin/skyport.mjs 注释自知此坑并提到"正式部署请用包装脚本"，但仓库未提供该脚本；README 只写"要求 ≥20"
+- **复现步骤**：1. `node bin/skyport.mjs doctor`（node18 环境）2. 观察堆栈
+- **修复建议**：bin/skyport.mjs 启动前检查 `process.version`，<20 直接打印中文指引退出；或随仓库提供指定 node 路径的包装脚本；CI 增加 node18 冒烟测试（断言报错可读）
+
+### S2〔阻断·最高危〕cwd 策略文件 + autoExecLowRisk + 引号变形 = 免审批 root 直通
+
+- **场景**：与调用者同 UID 的攻击者/AI（无需 root）在自己可写目录放 `{"autoExecLowRisk": true}` 的 `skyport.policy.json`，从该目录用 **low 上限 + `--auto-exec-low`** 的 agent 提交 `rm "-r" "-f" /tmp/any`
+- **期望**：测试计划 C8 主张策略文件"属信任边界内（本机 root 才能写）"；删除类命令应至少进人工审批
+- **实际**：实测 **`act_119407e9 ● 成功（524ms，退出码 0）`——零人工审批，以 root 在 t1 直接执行**。对照实验：同一命令在无策略文件的 cwd 下进 pending，证明直通完全来自 cwd 策略。AI 与 skyport 调用者同 UID，"root 才能写"不成立——**被治理方可以改写自己的治理参数**
+- **复现步骤**：1. `mkdir /tmp/x && cd /tmp/x && echo '{"autoExecLowRisk":true}' > skyport.policy.json` 2. `skyport agent create --name a --assets 't1*' --risk-ceiling low --auto-exec-low` 3. 从 /tmp/x 执行 `skyport agent run --api-key <key> --exec 'rm "-r" "-f" /tmp/any' --target t1` 4. 立即"成功"，无人审批
+- **定位与修复建议**：`src/services/risk.ts:24`（`POLICY_FILENAME` 按 `process.cwd()` 加载，`defaultPolicyPath()`）。修复：① 策略文件仅从 `~/.skyport/skyport.policy.json` 加载，或需 `--policy <path>` 显式指定且打印醒目警告；② `autoExecLowRisk=true` 时启动打 WARN、`doctor` 亮黄灯、`config` 显示该项（当前 config 输出完全没有它）；③ 策略文件变更写入审计事件流
+
+### S3〔严重〕风险引擎平凡变形绕过族：8 种危险命令被判 low
+
+- **场景**：medium 上限 agent 逐条提交变形命令，`action list --json` 查看 riskLevel
+- **期望**：破坏性命令不应为 low（测试计划 C 类判定标准）
+- **实际**：以下全部判 **low**：
+
+| 变形 | 命令 |
+| --- | --- |
+| 分离旗标 | `rm -r -f /`（C2 坐实） |
+| 引号包裹旗标 | `rm "-rf" /tmp/x`（C5）、`rm "-r" "-f" /tmp/x` |
+| 反斜杠转义 | `bash -c rm\ -rf\ /` |
+| 其他删除原语 | `find / -delete`、`python3 -c "shutil.rmtree(...)"`、`mv / /tmp/trash` |
+| 编码管道 | `echo <b64> | base64 -d | sh`（C3：管道进 shell 规则只盯 curl/wget） |
+| 变量间接 | `X='rm -rf /tmp/x'; $X`（C4） |
+
+  对照：`rm -rf /`、`rm --recursive --force /`、`dd`、`mkfs`、`shutdown`、`sh -c "rm -rf /"` 判 high 正常
+- **复现步骤**：1. `skyport agent run --api-key <key> --exec 'rm -r -f /' --target t1` 2. 输出"○ 待审批 low" 3. `action list --json` 确认
+- **定位与修复建议**：`src/services/risk.ts` HIGH_PATTERNS。根因：**风险评估在原始字符串上跑正则，且要求旗标合并为单 token（`-[a-z]*r[a-z]*`）；执行层 tokenizer 会剥引号——两套语义不一致**。修复：① 评估改在 `tokenizeCommand()` 输出上做，先剥引号再匹配；② 旗标解析用集合语义（合并/分离/长选项/引号包裹视为同一旗标集）；③ 补规则：`find -delete`、`shutil.rmtree`、`mv /`、任意程序管道进 `(ba\|z\|da)?sh`（不限 curl/wget）、`$VAR` 间接含危险子串时至少 medium；④ 兜底策略：无法解析结构的命令宁可 medium
+
+### S4〔严重〕资产范围穿透：t1-only agent 可递交打 t2 的跳板命令，仍判 low
+
+- **场景**：assets=`t1*` 的 agent 提交 `ssh t2 "rm -r -f /tmp/pivot-probe"` --target t1
+- **期望**：资产三件套约束实际作用面；跨资产 pivot 至少升级风险或拒绝
+- **实际**：判 **low**、门口放行（low 上限 agent 同样放行）。范围校验只看 `--target` 字段，命令内嵌 ssh/scp 跳板完全不在治理视野内
+- **复现步骤**：1. 用 t1* agent 提交上述命令 2. 观察输出"待审批 low" 3. 对照 `ssh t2 "systemctl restart nginx"` 判 medium（仅因 systemctl 规则兜住）
+- **修复建议**：对命令含 `ssh`/`scp`/`kubectl exec`/`docker exec` 的情况做二级目标提取；跳板目标不在 agent 资产范围内 → 拒绝或强制 high
+
+### S5〔严重〕自定义 DB 路径静默 chmod 任意父目录
+
+- **场景**：`SKYPORT_DB_PATH=/home/liu/skyport/docs/perm-test.db skyport agent list`（**只读查询**）
+- **期望**：只读命令不产生文件系统副作用；权限收紧只应发生在 `~/.skyport`
+- **实际**：`docs/` 从 775 被改成 **700**，且顺带创建新库文件。指向共享/项目目录会悄悄切断其他用户访问；指向 `/tmp` 下时误报 `EPERM: chmod '/tmp'`（3 种坏 DB 路径全误报为 chmod 错误，exit 8）
+- **复现步骤**：1. `stat -c %a <某共享目录>` 2. `SKYPORT_DB_PATH=<该目录>/x.db skyport agent list` 3. 再 stat，权限已 700（测试现场已还原）
+- **修复建议**：DB 初始化的 `chmod 0700` 收敛到默认数据目录；自定义 dbPath 时只校验并警告不改权限；错误归因区分别名/权限/损坏
+
+### S6〔严重〕webhook 明文外发完整命令，密码随命令出站（F3 验证属实）
+
+- **场景**：配置 `SKYPORT_NOTIFY_WEBHOOK_URL` 后 agent 提交 `mysql -uadmin -pS3cretPass123 -e "SELECT ..."`（该命令同时被判 low）
+- **期望**：出站载荷对凭据做遮蔽，或文档强制 webhook 目的地同级安全
+- **实际**：捕获的 POST body 含 `"command":"mysql -uadmin -pS3cretPass123 -e \"SELECT * FROM users\""`——密码原样出站。断网场景表现好：webhook 指向黑洞地址时创建 0.79s 返回不阻塞
+- **复现步骤**：1. 本地起 HTTP 监听 2. `SKYPORT_NOTIFY_WEBHOOK_URL=http://127.0.0.1:PORT/h skyport agent run ... --exec 'mysql -uadmin -pSECRET ...'` 3. 查看捕获 body
+- **修复建议**：通知载荷提供脱敏选项（正则遮蔽 `-p<secret>`/`password=`/`token=` 等）；脱敏默认开启，白名单命令全文外发
+
+### S7〔一般〕行动执行失败，CLI 退出码仍为 0
+
+- **场景**：`skyport run --exec 'ls /nope'`；或对 ssh 不通的资产 run（exit 255）；或超时失败
+- **期望**：执行失败非零退出（退出码契约 4=exec 域），脚本/cron 可判断成败
+- **实际**：三例均 exit 0，仅 stdout 打印"✕ 失败"。自动化调用方会误判成功
+- **复现步骤**：1. `skyport run --exec 'ls /nope'; echo $?` → 失败文案但输出 0
+- **修复建议**：行动终态 failed 时 CLI 以 exit 4 退出（approve/run/cancel 路径统一）
+
+### S8〔一般〕批量 approve 失败被包装成「未知错误」，退出码契约破坏
+
+- **场景**：D1——对已 success 的行动再次 approve
+- **期望**：计划 D1 明确预期 `ACTION_INVALID_STATE，exit 11`
+- **实际**：明细行有正确状态说明，但顶层是 `[skyport] 未知错误: 批量操作：1/1 条失败（其余已处理）` + **exit 1**。"未知错误"对运维是最高警报词汇，实际只是状态冲突
+- **复现步骤**：1. approve 一条至成功 2. 再次 approve 同 ID 3. exit 1 + "未知错误"
+- **修复建议**：批量操作聚合错误改为 `SKYPORT_ACTION_INVALID_STATE` 并保留各条明细；exit code 用最重要的失败项域码；文案去掉"未知错误"
+
+### S9〔一般〕超时被重试放大 4 倍，审计 duration_ms=0，提示不提重试
+
+- **场景**：E4——`skyport run --exec 'sleep 60' --target t1`
+- **期望**：10s 超时、行动 failed、timed_out=1（此三点正常）
+- **实际**：实际耗时 **42s**（超时被退避重试 3 次，共 4 次尝试）。对 `systemctl restart` 等非幂等命令，重试=重复副作用；executions 记录 `duration_ms=0`（真实 42s）；最终提示只写"超时（10000ms）"，重试细节只在 WARN 日志
+- **复现步骤**：1. `time skyport run --exec 'sleep 60' --target t1` 2. 观察 42s 3. 查 executions 行 `duration_ms=0`
+- **修复建议**：超时类失败不重试（或仅对显式标记幂等的命令重试）；executions 补记真实 duration 与尝试次数；用户提示包含"共尝试 N 次"
+
+### S10〔一般〕审批竞态 TOCTOU 窗口存在（源码证实，实测 15 并发未复现双执行）
+
+- **场景**：D3——3 轮 × 5 进程同时 approve 同一 pending
+- **期望**：行级原子状态迁移
+- **实际**：15 次并发均被 `executing` 中间态拦下，executions 行数均为 1；但 `approveAndExecute`（`src/services/actions.ts`）为**先 SELECT（expectPending）后 UPDATE，UPDATE 无 `AND status='pending'` 守卫**，理论窗口仍在。与计划"已知风险"一致
+- **复现步骤**：1. 建 pending 2. 5 进程同时 `approve <id>` 3. 查 executions 行数
+- **修复建议**：状态迁移改单条原子 SQL：`UPDATE actions SET status='executing' WHERE id=? AND status='pending'`，影响行数为 0 即拒绝
+
+### S11〔一般〕`--api-key` 明文走 argv，全机 ps 可见
+
+- **场景**：`skyport agent run --api-key skp_... --exec ...` 运行期间任意本地用户 `ps -eo args`
+- **期望**：凭据不出现在 argv
+- **实际**：`ps` 直接显示 `--api-key skp_41ff676a...`（已实测捕获）。多用户控制端场景下 key 生命期内任何本地用户可窃取
+- **复现步骤**：1. 后台跑带 --api-key 的 agent run 2. `ps -eo args | grep skp_` 3. 明文可见
+- **修复建议**：支持 `--api-key-file`/stdin 读取；文档主推 `SKYPORT_API_KEY`（environ 仅同 UID/root 可读）
+
+### S12〔一般〕输出截断无任何标记
+
+- **场景**：E3——远程产出 20MB 输出
+- **期望**：截断在记录/展示中可见
+- **实际**：stdout 恰好存 102400 字节，executions 无 truncated 字段，`action show` 无提示——审计读者无法区分"命令只输出这些"和"被截掉 99.9%"
+- **复现步骤**：1. `skyport run --exec 'head -c 20000000 /dev/zero | xxd' --target t1` 2. 查 executions：恰 102400 字节无截断标志
+- **修复建议**：executions 增加 `truncated` 标志与原始字节数；展示层尾部加省略提示
+
+### S13〔一般〕报错泄露底层驱动原文与英文校验文案，中英混杂
+
+- **场景**：重复建 agent / 重复建资产 / DB 打不开 / 导入坏文件
+- **期望**：统一中文人话报错
+- **实际**：尾行带 `由 SqliteError: UNIQUE constraint failed: agents.name`；超长名字报 zod 英文原文 `Too big: expected string to have <=100 characters`；JSON 导入坏文件报 `SyntaxError: Unexpected token 'a'...`
+- **复现步骤**：1. `skyport agent create --name redteam ...` 两次 2. 看末行
+- **修复建议**：错误格式化层按域映射驱动错误为固定中文文案；zod issues 翻译或包一层
+
+### S14〔建议〕白名单邻近命令兜底为 low
+
+- **场景**：C6——whitelist 精确放行 `kubectl get pods` 后提交 `kubectl get pods; id`
+- **期望**：计划预期"因 ;id 上下文给出合理等级"
+- **实际**：白名单全等比较守住（未命中白名单 ✓），但兜底成 **low**。autoExecLowRisk 开启时"白名单命令 + `;` 任意后缀"全部免审批直通
+- **复现步骤**：1. cwd 放含 whitelist 的策略 2. 提交 `kubectl get pods; id` 3. riskLevel=low
+- **修复建议**：含 `;` `|` `&&` `$()` `` ` `` 的命令不进 auto-exec 资格（即使整体 low）；或含命令分隔符时最低 medium
+
+### S15〔建议〕杂项
+
+- commander 用法错误双打印（raw `error: unknown option` + skyport 格式各一遍）
+- `--wait-seconds -5` 静默按 0 处理无提示（建议校验非负）
+- 多行命令被 `normalizeCommand` 静默压成单行执行，行动列表里却显示多行——展示与执行不一致
+- `config` 输出不显示 `autoExecLowRisk`/`notifyWebhookUrl`/`apiKey` 等安全关键项——运维无法一条命令看清安全姿态
+- `agent list` 对所有本地用户展示每个 agent 的 key 前 6 位（skp_41ff****）
+
+---
+
+## 四、人机体验问题清单（值班运维视角）
+
+> 结论：核心闭环可用（approve 内联反馈是亮点：时长/退出码/stdout 即时回显），但值守审批场景四个决策要素缺三：命令被截断（U1）、不知道是谁（U2）、没给理由（U3）、批一条切三次窗口（U4）。**系统安全兜底是"人眼看命令"，但人眼环节被照顾得最差**——与 S2/S3 形成双重削弱。
+
+### U1〔一般〕行动看板截断命令，审批人第一眼看不到要放什么
+
+- **场景**：`skyport action list` 查看 pending 中一条 150 字符 kubectl 发布命令
+- **期望**：审批主视图能看全命令，或截断时强提示"请 show 查看"
+- **实际**：显示为 `kubectl set image deployment/api api=registry.internal/app:…`——镜像版本号（审批最该核对的字段）恰好被截掉。**`watch` 视图反而显示全文，两个视图不一致**；逐条 `action show` 才能看全。对应计划已知薄弱点 6 的活体
+- **复现步骤**：1. 提交 100+ 字符命令的 pending 2. `action list` 看截断 3. `watch --once` 看全文 4. 对比
+- **修复建议**：看板列宽自适应或两行展示；截断时行尾加 `…（show <id> 看全文）`；与 watch 共用同一渲染函数保证一致
+
+### U2〔一般〕发起者只显示内部 ID，不显示 agent 名字
+
+- **场景**：值守/看板/`action show` 查看行动发起者
+- **期望**：显示 `opdemo`（或"名字 (ID)"）
+- **实际**：三处全部显示 `agent:agt_d9832d23`，需另开 `agent list` 人肉对照——名字就在库里
+- **复现步骤**：1. `agent create --name opdemo` 2. 该 agent 提交行动 3. `action show <id>` 看"发起者"行
+- **修复建议**：渲染层 join agents 表取 name；agent 已删除/吊销时回退显示 ID + 状态
+
+### U3〔一般〕值守屏不显示 agent 给的理由
+
+- **场景**：agent 提交带 `--reason '发布 api 新版本，变更单 CHG-xxx'`，值班 `skyport watch`
+- **期望**：理由是审批决策第一上下文，值守屏应展示
+- **实际**：watch 输出只有 `[low] agent:agt_xxx <命令>`，理由缺席，须逐条 `action show`
+- **复现步骤**：1. `agent run --reason 'xxx'` 建待办 2. `watch --once` 3. 输出无 reason
+- **修复建议**：watch/action list 的 pending 行加 reason（超长截断 + show 看全文）
+
+### U4〔一般〕值守不能就地审批，两个终端来回跳
+
+- **场景**：终端 A `skyport watch` 挂值守，来了一条待办
+- **期望**：就地 y/n 交互（@clack/prompts 已在依赖里）
+- **实际**：watch 纯只读轮询，只打印"处理：skyport approve act_xxx"——复制 ID、切终端、粘贴。每条待办三次窗口切换
+- **复现步骤**：1. 终端 A `skyport watch` 2. 终端 B 造 pending 3. A 无法交互
+- **修复建议**：watch 增加交互模式（默认开，`--no-interactive` 关闭）：方向键选择、y 批准 / n 否决 / d 看详情；非 TTY 自动退化为现状
+
+### U5〔一般〕台账无翻页、无 agent/目标/时间过滤，200 条后老记录不可见
+
+- **场景**：库内 145 条行动，`action list` 全量倒出 150 行；继续积累到 200+
+- **期望**：分页 + 按 agent/目标/时间段过滤（"opdemo 今天干了什么"是审计高频问题）
+- **实际**：一次倒完（上限 200），唯一过滤器 `--status`；`--agent` 不存在（unknown option）。**超 200 条后更老记录从任何 CLI 视图不可见——审计追溯断崖**
+- **复现步骤**：1. 造 100+ 条行动 2. `action list | wc -l` 3. 试 `--agent opdemo` 报错
+- **修复建议**：`--agent/--target/--since/--limit/--offset` 过滤分页；超上限时提示"仅显示最近 N 条，用过滤条件缩小范围"
+
+### U6〔一般〕`agent run` 默认阻塞 120 秒且期间零输出
+
+- **场景**：不带 `--wait-seconds` 调用（默认 120，`src/cli/commands/agents.ts:117`）
+- **期望**：进入等待时立刻打印"已登记，等待人工审批（最长 120s）…"
+- **实际**：登记后**静默挂 2 分钟**（实测 75s+ 无任何输出），到点才打印结果。AI 集成方与人手工代跑都会以为挂死
+- **复现步骤**：1. `skyport agent run --api-key <k> --exec 'ls' --target t1`（不带 wait）2. 观察 120s 无输出
+- **修复建议**：进入等待立即打印登记结果 + 提示行；长等待期间周期性心跳或至少文档写明默认值
+
+### U7〔建议〕慢命令审批时操作者干等 42 秒无进度
+
+- **场景**：approve 一条会超时的命令（`sleep 60`）
+- **期望**：显示"执行中… / 重试 2/4"
+- **实际**：重试 WARN 混在错误流，无面向人的进度提示（与 S9 同源，补充人感维度）
+- **修复建议**：随 S9 一并处理，approve 执行期间输出阶段提示
+
+### U8〔建议〕资产导入只支持 JSON，坏文件泄露解析器原文
+
+- **场景**：`skyport asset import assets.csv`
+- **期望**：支持 CSV 或至少报"仅支持 JSON 数组"
+- **实际**：`SyntaxError: Unexpected token 'a'...` 直出（S13 同模式）；JSON 格式导入正常
+- **复现步骤**：1. 造 CSV 2. `asset import x.csv`
+- **修复建议**：随 S13 统一处理；可选支持 CSV
+
+---
+
+## 五、改进路线图（映射问题 ID）
+
+**P0 —— 拆掉零审批直通链（发布前必须，任断一环即大幅降险）**
+
+1. 策略文件加载位置收权：cwd → `~/.skyport/`（或 `--policy` 显式 + 警告）【S2】
+2. 风险评估改基于 tokenizer 输出 + 旗标集合语义 + 补规则【S3】
+3. 命令内嵌跳板做二级目标范围校验【S4】
+4. autoExecLowRisk 开启时 doctor 亮灯、config 可见、审计留痕；默认关闭【S2/S14/S15】
+5. bin 包装脚本 + node 版本人话守卫【S1】
+
+**P1 —— 契约与副作用**
+
+6. DB 路径 chmod 收敛到默认数据目录【S5】
+7. webhook 载荷脱敏【S6】
+8. 执行失败非零退出【S7】；批量错误保留真实域码、删"未知错误"【S8】
+9. 超时不重试 + duration_ms/尝试次数如实记录【S9】
+
+**P2 —— 竞态、凭据与值守体验**
+
+10. approve 原子状态迁移【S10】
+11. key 读取方式（file/stdin 主推）【S11】；截断标记【S12】；报错统一中文【S13】
+12. 看板不截断或截断必提示【U1】；值守屏显示 reason【U3】；发起者显示名字【U2】
+13. watch 就地审批【U4】；台账过滤分页【U5】；agent run 等待提示【U6】
+
+**P3 —— 打磨**
+
+14. U7/U8/S15 杂项
+
+---
+
+## 六、验证方式说明（开发完成后回归用）
+
+- 全部复现步骤在本文档各条目内，环境要求 node ≥ 20（本机用 `~/node22/bin/node`）。
+- 危险命令验证只需观察到 `riskLevel` 判级与门口行为即可，**切勿 approve** 破坏性 pending。
+- 修复后重点回归：第二节通过项基线（不要为修安全问题破坏已通过的行为）+ 本文档各条复现步骤的反向验证（期望行为出现）。
+- 建议为 S3 增加回归用例集：每条绕过变形 ≥ 1 个单测（`src/services/risk.test.ts`）。
