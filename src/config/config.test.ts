@@ -51,6 +51,13 @@ describe('config 配置体系', () => {
     expect(config.checkTimeoutMs).toBe(800);
   });
 
+  it('正常路径：SKYPORT_API_KEY 注入 apiKey（agent 身份凭证走配置体系）', () => {
+    const config = loadConfig({ env: { SKYPORT_API_KEY: 'skp_deadbeef' }, configPath: absentConfigPath() });
+    expect(config.apiKey).toBe('skp_deadbeef');
+    const without = loadConfig({ env: {}, configPath: absentConfigPath() });
+    expect(without.apiKey).toBeUndefined();
+  });
+
   it('正常路径：SKYPORT_ 环境变量覆盖默认值，字符串自动强转为数字', () => {
     const config = loadConfig({
       env: { SKYPORT_EXEC_TIMEOUT_MS: '2500', SKYPORT_LOG_LEVEL: 'debug' },

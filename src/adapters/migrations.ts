@@ -41,4 +41,63 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE agents (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          key_hash TEXT NOT NULL UNIQUE,
+          key_hint TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          scopes TEXT NOT NULL DEFAULT '["action:create"]',
+          asset_patterns TEXT NOT NULL DEFAULT '["*"]',
+          risk_ceiling TEXT NOT NULL DEFAULT 'medium',
+          expires_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE actions (
+          id TEXT PRIMARY KEY,
+          command TEXT NOT NULL,
+          target_asset_id TEXT REFERENCES assets(id) ON DELETE SET NULL,
+          target_name TEXT NOT NULL DEFAULT 'local',
+          target_kind TEXT NOT NULL DEFAULT 'local',
+          reason TEXT,
+          risk_level TEXT NOT NULL,
+          risk_source TEXT NOT NULL,
+          status TEXT NOT NULL,
+          actor_type TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_actions_status ON actions(status);
+        CREATE TABLE action_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          action_id TEXT NOT NULL REFERENCES actions(id) ON DELETE CASCADE,
+          event TEXT NOT NULL,
+          actor_type TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          detail TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_action_events_action ON action_events(action_id);
+        CREATE TABLE executions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          action_id TEXT NOT NULL REFERENCES actions(id) ON DELETE CASCADE,
+          ok INTEGER NOT NULL,
+          stdout TEXT NOT NULL,
+          stderr TEXT NOT NULL,
+          exit_code INTEGER,
+          timed_out INTEGER NOT NULL DEFAULT 0,
+          duration_ms INTEGER NOT NULL,
+          error TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_executions_action ON executions(action_id);
+      `);
+    },
+  },
 ];

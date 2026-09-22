@@ -32,6 +32,8 @@ const configSchema = z.strictObject({
   execBackoffBaseMs: z.coerce.number().int().min(0).default(200),
   dbPath: z.string().min(1).default(join(DATA_DIR, 'skyport.db')),
   checkTimeoutMs: z.coerce.number().int().positive().default(5_000),
+  /** agent 身份凭证（SKYPORT_API_KEY）：只在需要以 agent 身份调用时设置 */
+  apiKey: z.string().min(1).optional(),
 });
 
 export type SkyportConfig = z.infer<typeof configSchema>;
@@ -52,6 +54,7 @@ const ENV_KEY_TO_CONFIG_KEY: Readonly<Record<string, string>> = {
   SKYPORT_EXEC_BACKOFF_BASE_MS: 'execBackoffBaseMs',
   SKYPORT_DB_PATH: 'dbPath',
   SKYPORT_CHECK_TIMEOUT_MS: 'checkTimeoutMs',
+  SKYPORT_API_KEY: 'apiKey',
 };
 
 export function defaultProjectConfigPath(): string {
