@@ -12,6 +12,52 @@ import { baseEnvironment, getConfig } from '../config/config';
 import { createError, ERROR_CODES, isSkyportError } from '../errors/errors';
 import { rootLogger } from '../logger/logger';
 
+function parsePidList(stdout: string): number[] {
+  return stdout
+    .split('\n')
+    .map((line) => Number(line.trim()))
+    .filter((pid) => Number.isInteger(pid) && pid > 0);
+}
+
+/** 递归收集整棵后代树（execFileSync 保证快照一致性；Windows 退化为只杀直接子进程） */
+function collectDescendantPids(rootPid: number): number[] {
+  if (process.platform === 'win32') return [];
+  const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+  const all: number[] = [];
+  let frontier = [rootPid];
+  for (let depth = 0; depth < 10 && frontier.length > 0; depth += 1) {
+    const next: number[] = [];
+    for (const pid of frontier) {
+      try {
+        const out = execFileSync('ps', ['-o', 'pid=', '--ppid', String(pid)], {
+          encoding: 'utf8',
+          timeout: 2_000,
+        });
+        next.push(...parsePidList(out));
+      } catch {
+        // ps 失败（进程已死/平台不支持）→ 该分支无后代可杀
+      }
+    }
+    all.push(...next);
+    frontier = next;
+  }
+  return all;
+}
+
+/** 超时杀整棵树（借鉴 ZCode process-tree）：先快照后代（根死后孤儿会被 init 收养，ppid 失效），再杀根，再杀后代 */
+function killTree(child: { kill: (signal?: NodeJS.Signals) => boolean; pid?: number | undefined }): void {
+  const pid = child.pid;
+  const descendants = pid === undefined ? [] : collectDescendantPids(pid);
+  child.kill('SIGKILL');
+  for (const descendant of descendants) {
+    try {
+      process.kill(descendant, 'SIGKILL');
+    } catch {
+      // 已死，继续
+    }
+  }
+}
+
 export interface ExecOptions {
   /** 单次尝试超时（毫秒），缺省取配置 execTimeoutMs（默认 10000） */
   readonly timeoutMs?: number | undefined;
@@ -130,8 +176,8 @@ async function runOnce(command: string, args: readonly string[], options: RunOnc
 
     const timer = setTimeout(() => {
       timedOut = true;
-      // SIGKILL 确保超时后子进程必死，避免僵尸进程占住 Promise
-      child.kill('SIGKILL');
+      // 杀整棵树：超时后子进程及其后代都必须死，防孤儿继续产生副作用
+      killTree(child);
     }, options.timeoutMs);
 
     // error 与 close 可能接连触发，只结算一次

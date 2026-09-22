@@ -97,4 +97,25 @@ describe('executor 命令执行层', () => {
     expect(result.exitCode).toBe(0);
     expect(result.attempts).toBe(2);
   });
+
+  it('进程树击杀：超时后孙进程一并被杀，无孤儿残留（借鉴 ZCode process-tree）', async () => {
+    // 子进程 node 再 spawn 一个 sleep 孙进程并记录其 PID
+    const grandchildPidFile = join(tempDir, 'grandchild.pid');
+    const script = `const {spawn}=require('child_process');const fs=require('fs');const g=spawn('sleep',['30']);fs.writeFileSync(${JSON.stringify(grandchildPidFile)},String(g.pid));setInterval(()=>{},1000);`;
+    const captured = await captureExecError(() =>
+      execute('node', ['-e', script], { timeoutMs: 300, maxRetries: 0 }),
+    );
+    expect(captured.type).toBe('SKYPORT_EXEC_TIMEOUT');
+    // 等 ps 快照与信号传播完成
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const { readFileSync } = await import('node:fs');
+    const grandchildPid = Number(readFileSync(grandchildPidFile, 'utf8').trim());
+    let alive = true;
+    try {
+      process.kill(grandchildPid, 0);
+    } catch {
+      alive = false;
+    }
+    expect(alive).toBe(false);
+  });
 });
