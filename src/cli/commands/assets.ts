@@ -3,6 +3,7 @@
  * 参数校验双保险：commander requiredOption/choices 挡明显误用，服务层 zod 兜底。
  */
 import { Command, Option } from 'commander';
+import { isCancel, select } from '@clack/prompts';
 import {
   ASSET_TYPES,
   addAsset,
@@ -13,6 +14,7 @@ import {
   listAssets,
   parseLabelPairs,
   removeAsset,
+  type Asset,
   type AssetType,
   type ConnectMode,
 } from '../../services/assets';
@@ -28,6 +30,7 @@ interface ListOptions {
   readonly type?: string | undefined;
   readonly label?: string | undefined;
   readonly json?: boolean | undefined;
+  readonly select?: boolean | undefined;
 }
 
 interface AddOptions {
@@ -49,11 +52,12 @@ function collectPair(value: string, previous: readonly string[]): readonly strin
 /** list 的选项与行为在 asset list 与顶层 list 之间共享，保证两者输出一致 */
 export function configureListCommand(command: Command): Command {
   return command
-    .description('资产清单（可用 --type / --label 过滤，--json 供 AI 解析）')
+    .description('资产清单（可用 --type / --label 过滤，--json 供 AI 解析，--select 交互下钻）')
     .option('--type <type>', '按类型过滤')
     .option('--label <pair>', '按标签过滤（key=value）')
     .option('--json', '机器可读输出')
-    .action((options: ListOptions) => {
+    .option('--select', '交互式选择资产查看（需终端；非终端自动降级为清单）')
+    .action(async (options: ListOptions) => {
       const labelPairs = options.label === undefined ? {} : parseLabelPairs([options.label]);
       const labelKey = Object.keys(labelPairs)[0];
       const assets = listAssets({
@@ -61,9 +65,41 @@ export function configureListCommand(command: Command): Command {
         labelKey,
         labelValue: labelKey === undefined ? undefined : labelPairs[labelKey],
       });
+      if (options.select === true) {
+        await runAssetPicker(assets);
+        return;
+      }
       if (options.json === true) printJson(assets);
       else process.stdout.write(renderAssetList(assets));
     });
+}
+
+/** 交互式下钻：方向键选资产 → 详情 + 检查历史；非 TTY 降级为清单输出（脚本安全） */
+async function runAssetPicker(assets: readonly Asset[]): Promise<void> {
+  if (assets.length === 0) {
+    process.stdout.write(renderAssetList(assets));
+    return;
+  }
+  if (process.stdout.isTTY !== true) {
+    process.stdout.write(renderAssetList(assets));
+    process.stdout.write('（当前非终端环境，--select 交互不可用，已降级为清单输出）\n');
+    return;
+  }
+  for (;;) {
+    const choice = await select({
+      message: '选择资产查看（Esc 取消退出）',
+      options: [
+        ...assets.map((asset) => ({
+          value: asset.id,
+          label: `${asset.name} · ${asset.status} · ${asset.addr ?? '无地址'}`,
+        })),
+        { value: '__quit__', label: '退出' },
+      ],
+    });
+    if (isCancel(choice) || choice === '__quit__') break;
+    const asset = getAsset(choice);
+    process.stdout.write(renderAssetDetail(asset, getCheckHistory(asset.id, 5)));
+  }
 }
 
 export function buildAssetCommand(): Command {

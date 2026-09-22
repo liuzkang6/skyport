@@ -29,9 +29,9 @@ pnpm dev asset check web-01   # TCP 连通性检查
 | `pnpm verify` | 组合门禁：typecheck + lint + test |
 | `pnpm dev` | 以 tsx 直接运行 CLI（如 `pnpm dev doctor`） |
 
-CLI 子命令（`skyport <命令>`）：`init`（初始化）、`list`（资产清单，= `asset list`）、`asset add / import / list / show / check / remove`、`agent create / list / show / pause / activate / revoke / run`（AI 一站式）、`action create / list / show`（行动台账）、`approve / reject / cancel`（人工审批，禁止带 key）、`run`（人自用直通）、`config`（打印生效配置）、`doctor`（自检）。查询类命令带 `--json` 可输出机器可读格式（供 AI 解析）。
+CLI 子命令（`skyport <命令>`）：`init`（初始化）、`list`（资产清单，= `asset list`；`--select` 交互下钻）、`asset add / import / list / show / check / remove`、`agent create / list / show / pause / activate / revoke / run`（AI 一站式）、`action create / list / show`（行动台账）、`approve <id...> / reject <id...>`（人工审批，可批量，禁止带 key）、`cancel`、`run`（人自用直通）、`watch`（前台值守待审批，新行动响铃）、`config`（打印生效配置）、`doctor`（自检）。查询类命令带 `--json` 可输出机器可读格式（供 AI 解析）。
 
-治理速览：AI 以 `--api-key`（或 `SKYPORT_API_KEY`）发起行动 → 风险分级（低危且策略允许可自动执行；AI 自报风险只升不降）→ 中高危进 pending 等人 → `skyport approve <id>` 放行即执行 → 全程事件与执行留痕。风险策略放项目根 `skyport.policy.json`（`rules` / `whitelist` / `autoExecLowRisk`）。
+治理速览：AI 以 `--api-key`（或 `SKYPORT_API_KEY`）发起行动 → 风险分级（低危且策略允许可自动执行；AI 自报风险只升不降）→ 中高危进 pending 等人（可配 `SKYPORT_NOTIFY_WEBHOOK_URL` 推送到钉钉/飞书/Slack 的 incoming webhook；或 `skyport watch` 前台值守）→ `skyport approve <id>` 放行即执行 → 全程事件与执行留痕。风险策略放项目根 `skyport.policy.json`（`rules` / `whitelist` / `autoExecLowRisk`）。
 
 退出码约定：0 成功；1 未知错误；2 用法错误；3-7 config/exec/fs/network/permission 域；8 db；9 asset；10 agent；11 action。
 
@@ -39,7 +39,7 @@ CLI 子命令（`skyport <命令>`）：`init`（初始化）、`list`（资产�
 
 - 环境变量前缀：`SKYPORT_`（如 `SKYPORT_LOG_LEVEL=debug`）
 - 优先级：项目配置 `skyport.config.json` > 环境变量 > 默认值
-- 可配置项：`logLevel` / `logFile` / `execTimeoutMs` / `execMaxRetries` / `execMaxOutputBytes` / `execBackoffBaseMs` / `dbPath` / `checkTimeoutMs`（执行默认：超时 10s、重试 3 次、输出截断 100KB；检查超时默认 5s）
+- 可配置项：`logLevel` / `logFile` / `execTimeoutMs` / `execMaxRetries` / `execMaxOutputBytes` / `execBackoffBaseMs` / `dbPath` / `checkTimeoutMs` / `apiKey` / `notifyWebhookUrl`（执行默认：超时 10s、重试 3 次、输出截断 100KB；检查超时默认 5s）
 - 存储：SQLite（better-sqlite3，WAL），默认 `~/.skyport/skyport.db`（目录 0700 / 文件 0600），`SKYPORT_DB_PATH` 可覆盖；打开即自动迁移
 - 默认值集中在 `src/config/config.ts` 的 schema 中，业务代码禁止硬编码
 

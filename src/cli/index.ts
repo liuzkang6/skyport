@@ -15,6 +15,7 @@ import { runDoctor } from '../services/doctor';
 import { buildAgentCommand } from './commands/agents';
 import { buildActionCommand, buildApprovalCommands } from './commands/actions';
 import { buildAssetCommand, configureListCommand } from './commands/assets';
+import { buildWatchCommand } from './commands/watch';
 
 /** 退出码约定：0 成功；1 未知错误；2 用法错误；3-9 按错误域（config/exec/fs/network/permission/db/asset） */
 const EXIT_OK = 0;
@@ -55,7 +56,7 @@ function exitCodeForError(error: unknown): number {
 function formatErrorForCli(error: unknown): string {
   if (error instanceof CommanderError) return ''; // commander 已自行输出，不重复打印
   if (isSkyportError(error)) return formatSkyportError(error);
-  const inner = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  const inner = error instanceof Error ? error.message : String(error);
   return `[skyport] 未知错误: ${inner}`;
 }
 
@@ -130,6 +131,7 @@ function buildProgram(): Command {
   program.addCommand(buildActionCommand());
   program.addCommand(buildAgentCommand());
   buildApprovalCommands(program);
+  buildWatchCommand(program);
 
   program
     .command('doctor')

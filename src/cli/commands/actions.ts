@@ -15,6 +15,7 @@ import {
   listActions,
   rejectAction,
   runDirect,
+  type ActionResult,
   type ActionStatus,
 } from '../../services/actions';
 import { getLastExecution } from '../../services/action-exec';
@@ -89,27 +90,30 @@ export function buildActionCommand(): Command {
   return action;
 }
 
-/** 顶层人工命令：approve / reject / cancel（禁止带 key） */
+/** 顶层人工命令：approve / reject（可批量）/ cancel（禁止带 key） */
 export function buildApprovalCommands(program: Command): void {
   program
-    .command('approve <id>')
-    .description('批准并立即执行一条 pending 行动（只允许人）')
+    .command('approve <ids...>')
+    .description('批准并立即执行 pending 行动（可批量，只允许人）')
     .option('--json', '机器可读输出')
-    .action(async (id: string, options: { json?: boolean | undefined }) => {
+    .action(async (ids: readonly string[], options: { json?: boolean | undefined }) => {
       const actor = requireHumanActor(getConfig().apiKey);
-      const result = await approveAction(id, actor);
-      if (options.json === true) printJson(result);
-      else process.stdout.write(renderActionResult(result));
+      await processBatch(ids, options.json === true, async (id) => {
+        const result = await approveAction(id, actor);
+        return { id, ok: true, result };
+      });
     });
 
   program
-    .command('reject <id>')
-    .description('否决一条 pending 行动（只允许人）')
+    .command('reject <ids...>')
+    .description('否决 pending 行动（可批量，只允许人）')
     .option('--note <text>', '否决理由')
-    .action((id: string, options: { note?: string | undefined }) => {
+    .action(async (ids: readonly string[], options: { note?: string | undefined }) => {
       const actor = requireHumanActor(getConfig().apiKey);
-      const updated = rejectAction(id, actor, options.note);
-      process.stdout.write(`已否决 ${updated.id}（${updated.command.slice(0, 60)}）\n`);
+      await processBatch(ids, false, async (id) => {
+        const updated = rejectAction(id, actor, options.note);
+        return { id, ok: true, result: undefined, message: `已否决 ${updated.id}` };
+      });
     });
 
   program
@@ -138,4 +142,37 @@ export function buildApprovalCommands(program: Command): void {
       if (options.json === true) printJson(result);
       else process.stdout.write(renderActionResult(result));
     });
+}
+
+interface BatchOutcome {
+  readonly id: string;
+  readonly ok: boolean;
+  readonly result?: ActionResult | undefined;
+  readonly message?: string | undefined;
+}
+
+/** 批量处理：逐条执行逐条输出，单条失败不中断，结束后有失败则非零退出 */
+async function processBatch(
+  ids: readonly string[],
+  json: boolean,
+  handle: (id: string) => Promise<BatchOutcome>,
+): Promise<void> {
+  const outcomes: BatchOutcome[] = [];
+  for (const id of ids) {
+    try {
+      const outcome = await handle(id);
+      outcomes.push(outcome);
+      if (!json) {
+        if (outcome.result !== undefined) process.stdout.write(renderActionResult(outcome.result));
+        else if (outcome.message !== undefined) process.stdout.write(`${outcome.message}\n`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      outcomes.push({ id, ok: false });
+      if (!json) process.stdout.write(`✕ ${id} 失败：${message}\n`);
+    }
+  }
+  const failed = outcomes.filter((outcome) => !outcome.ok).length;
+  if (json) printJson({ outcomes: outcomes.map(({ id, ok }) => ({ id, ok })), failed });
+  if (failed > 0) throw new Error(`批量操作：${failed}/${ids.length} 条失败（其余已处理）`);
 }

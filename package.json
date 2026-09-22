@@ -16,6 +16,7 @@
     "dev": "tsx src/cli/index.ts"
   },
   "dependencies": {
+    "@clack/prompts": "^1.8.1",
     "commander": "^15.0.0",
     "zod": "^4.6.5"
   },
