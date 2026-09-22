@@ -11,6 +11,7 @@ import { listActions, getAction } from '../services/action-queries';
 import { listAssets, getAsset } from '../services/assets';
 import { listServices } from '../services/cmdb';
 import { verifyAuditChain } from '../services/audit-chain';
+import { detectAndParse, ingestAlert, listAlerts, ackAlert, closeAlert, getAlertStats } from '../services/alert-bus';
 
 export interface ServeOptions {
   readonly port?: number | undefined;
@@ -130,10 +131,60 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
+  // ── 告警总线端点（spec/alert-bus）──
+
+  if (method === 'POST' && path === '/api/v1/alerts') {
+    const body = await readBody(req);
+    const parsed = detectAndParse(body);
+    if (parsed.length === 0) {
+      sendJson(res, 400, { error: '无法识别的告警格式（支持 Alertmanager/Zabbix/skyport 原生）' });
+      return;
+    }
+    const results = parsed.map((p) => ingestAlert(p));
+    sendJson(res, 201, { ingested: results.length, alerts: results.map((r) => ({ id: r.alert.id, created: r.created })) });
+    return;
+  }
+
+  if (method === 'GET' && path === '/api/v1/alerts') {
+    const status = url.searchParams.get('status') ?? undefined;
+    sendJson(res, 200, { alerts: listAlerts(status as never) });
+    return;
+  }
+
+  if (method === 'GET' && path === '/api/v1/alerts/stats') {
+    sendJson(res, 200, getAlertStats());
+    return;
+  }
+
+  if (method === 'PATCH' && path.startsWith('/api/v1/alerts/') && path.endsWith('/ack')) {
+    const id = path.split('/')[3] ?? '';
+    sendJson(res, 200, ackAlert(decodeURIComponent(id)));
+    return;
+  }
+
+  if (method === 'PATCH' && path.startsWith('/api/v1/alerts/') && path.endsWith('/close')) {
+    const id = path.split('/')[3] ?? '';
+    sendJson(res, 200, closeAlert(decodeURIComponent(id)));
+    return;
+  }
+
   if (method === 'GET' && path === '/api/v1/whoami') {
     sendJson(res, 200, { actor });
     return;
   }
 
   sendJson(res, 404, { error: `Not found: ${method} ${path}` });
+}
+
+async function readBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(chunk as Buffer);
+  }
+  if (chunks.length === 0) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    return {};
+  }
 }

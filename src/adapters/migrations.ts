@@ -202,5 +202,43 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 9,
+    up: (db) => {
+      // 告警总线（spec/alert-bus）：Alerta 模型
+      db.exec(`
+        CREATE TABLE alerts (
+          id TEXT PRIMARY KEY,
+          event TEXT NOT NULL,
+          resource TEXT NOT NULL,
+          severity TEXT NOT NULL CHECK(severity IN ('critical','warning','info')),
+          status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','ack','closed')),
+          value TEXT,
+          text TEXT,
+          tags TEXT NOT NULL DEFAULT '[]',
+          attributes TEXT NOT NULL DEFAULT '{}',
+          correlate TEXT NOT NULL DEFAULT '[]',
+          origin TEXT NOT NULL DEFAULT 'api',
+          asset_id TEXT REFERENCES assets(id) ON DELETE SET NULL,
+          timestamp TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          dedup_key TEXT NOT NULL UNIQUE,
+          escalated INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_alerts_status ON alerts(status);
+        CREATE INDEX idx_alerts_severity ON alerts(severity);
+        CREATE TABLE alert_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          alert_id TEXT NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+          field TEXT NOT NULL,
+          old_value TEXT,
+          new_value TEXT,
+          changed_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_alert_history_alert ON alert_history(alert_id);
+      `);
+    },
+  },
 ];
 
