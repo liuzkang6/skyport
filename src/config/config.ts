@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readJsonFileSync } from '../adapters/fs';
 import { createError, ERROR_CODES, isSkyportError } from '../errors/errors';
+import { translateIssues } from '../errors/messages';
 import { z } from 'zod';
 
 /** 环境变量统一前缀（skyport_ 的大写形式） */
@@ -39,6 +40,11 @@ const configSchema = z.strictObject({
   /** 风险策略文件显式路径（SKYPORT_POLICY_PATH）；缺省用 ~/.skyport/skyport.policy.json。
    * 红队 S2：策略一律不读 cwd——cwd 是被治理方（同 UID 的 AI）可写区 */
   policyPath: z.string().min(1).optional(),
+  /** 错误输出显示底层技术细节（红队 S13：默认只给人话，排查时打开） */
+  verboseErrors: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .transform((value) => value === true || value === 'true')
+    .default(false),
 });
 
 export type SkyportConfig = z.infer<typeof configSchema>;
@@ -62,6 +68,7 @@ const ENV_KEY_TO_CONFIG_KEY: Readonly<Record<string, string>> = {
   SKYPORT_API_KEY: 'apiKey',
   SKYPORT_NOTIFY_WEBHOOK_URL: 'notifyWebhookUrl',
   SKYPORT_POLICY_PATH: 'policyPath',
+  SKYPORT_VERBOSE_ERRORS: 'verboseErrors',
 };
 
 export function defaultProjectConfigPath(): string {
@@ -77,13 +84,7 @@ export function loadConfig(options: LoadConfigOptions = {}): SkyportConfig {
   const parsed = configSchema.safeParse({ ...fromEnv, ...fromFile });
   if (!parsed.success) {
     throw createError(ERROR_CODES.CONFIG_INVALID, '配置校验失败', {
-      context: {
-        path: configPath,
-        issues: parsed.error.issues.map((issue) => ({
-          path: issue.path.map(String).join('.'),
-          message: issue.message,
-        })),
-      },
+      context: { path: configPath, issues: translateIssues(parsed.error.issues) },
     });
   }
   return parsed.data;

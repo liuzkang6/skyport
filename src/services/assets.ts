@@ -8,6 +8,7 @@ import { readJsonFileSync } from '../adapters/fs';
 import { tcpConnectCheck } from '../adapters/net';
 import { getConfig } from '../config/config';
 import { createError, ERROR_CODES, isSkyportError } from '../errors/errors';
+import { translateIssues } from '../errors/messages';
 import { z } from 'zod';
 
 export const ASSET_TYPES = ['host', 'cluster', 'cloud-account'] as const;
@@ -269,12 +270,7 @@ function prepareAsset(raw: unknown): PreparedAsset {
   const parsed = assetInputSchema.safeParse(raw);
   if (!parsed.success) {
     throw createError(ERROR_CODES.ASSET_INVALID, '资产字段不合法', {
-      context: {
-        issues: parsed.error.issues.map((issue) => ({
-          path: issue.path.map(String).join('.'),
-          message: issue.message,
-        })),
-      },
+      context: { issues: translateIssues(parsed.error.issues) },
     });
   }
   const value = parsed.data;

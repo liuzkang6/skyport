@@ -6,6 +6,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { userInfo } from 'node:os';
 import { getDb } from '../adapters/db';
 import { createError, ERROR_CODES } from '../errors/errors';
+import { translateIssues } from '../errors/messages';
 import { RISK_WEIGHT, type RiskLevel } from './risk';
 import { z } from 'zod';
 
@@ -95,12 +96,7 @@ export function createAgent(input: CreateAgentInput): IssuedAgent {
   const parsed = createAgentSchema.safeParse(schemaInput);
   if (!parsed.success) {
     throw createError(ERROR_CODES.AGENT_INVALID, 'agent 字段不合法', {
-      context: {
-        issues: parsed.error.issues.map((issue) => ({
-          path: issue.path.map(String).join('.'),
-          message: issue.message,
-        })),
-      },
+      context: { issues: translateIssues(parsed.error.issues) },
     });
   }
   const plaintextKey = `${KEY_PREFIX}${randomBytes(16).toString('hex')}`;

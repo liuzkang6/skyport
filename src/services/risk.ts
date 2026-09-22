@@ -10,11 +10,12 @@
 import { readJsonFileSync } from '../adapters/fs';
 import { DATA_DIR, getConfig } from '../config/config';
 import { createError, ERROR_CODES, isSkyportError } from '../errors/errors';
+import { translateIssues } from '../errors/messages';
 import { rootLogger } from '../logger/logger';
 import { normalizeCommand, parseSegments } from './risk-parse';
 import { z } from 'zod';
 
-export { tokenizeCommand } from './risk-parse';
+export { normalizeCommand, tokenizeCommand } from './risk-parse';
 
 export const RISK_LEVELS = ['low', 'medium', 'high'] as const;
 export type RiskLevel = (typeof RISK_LEVELS)[number];
@@ -76,13 +77,7 @@ export function loadPolicy(policyPath: string = getConfig().policyPath ?? defaul
   const parsed = policySchema.safeParse(raw);
   if (!parsed.success) {
     throw createError(ERROR_CODES.CONFIG_INVALID, `策略文件不合法: ${policyPath}`, {
-      context: {
-        path: policyPath,
-        issues: parsed.error.issues.map((issue) => ({
-          path: issue.path.map(String).join('.'),
-          message: issue.message,
-        })),
-      },
+      context: { path: policyPath, issues: translateIssues(parsed.error.issues) },
     });
   }
   if (parsed.data.autoExecLowRisk) {
