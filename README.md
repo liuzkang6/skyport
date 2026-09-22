@@ -31,7 +31,7 @@ pnpm dev asset check web-01   # TCP 连通性检查
 
 CLI 子命令（`skyport <命令>`）：`init`（初始化）、`list`（资产清单，= `asset list`；`--select` 交互下钻）、`asset add / import / list / show / check / remove`、`agent create / list / show / pause / activate / revoke / run`（AI 一站式）、`action create / list / show`（行动台账）、`approve <id...> / reject <id...>`（人工审批，可批量，禁止带 key）、`cancel`、`run`（人自用直通）、`watch`（前台值守待审批，新行动响铃）、`config`（打印生效配置）、`doctor`（自检）。查询类命令带 `--json` 可输出机器可读格式（供 AI 解析）。
 
-治理速览：AI 以 `--api-key`（或 `SKYPORT_API_KEY`）发起行动 → 风险分级（低危且策略允许可自动执行；AI 自报风险只升不降）→ 中高危进 pending 等人（可配 `SKYPORT_NOTIFY_WEBHOOK_URL` 推送到钉钉/飞书/Slack 的 incoming webhook；或 `skyport watch` 前台值守）→ `skyport approve <id>` 放行即执行 → 全程事件与执行留痕。风险策略放项目根 `skyport.policy.json`（`rules` / `whitelist` / `autoExecLowRisk`）。
+治理速览：AI 以 `--api-key`（或 `SKYPORT_API_KEY`）发起行动 → 风险分级（低危且策略允许可自动执行；AI 自报风险只升不降）→ 中高危进 pending 等人（可配 `SKYPORT_NOTIFY_WEBHOOK_URL` 推送到钉钉/飞书/Slack 的 incoming webhook；或 `skyport watch` 前台值守）→ `skyport approve <id>` 放行即执行 → 全程事件与执行留痕。风险策略放 **`~/.skyport/skyport.policy.json`**（数据目录 0700，**不从 cwd 读取**——cwd 是被治理 AI 的可写区；`SKYPORT_POLICY_PATH` 可显式指定，开启时启动告警）；`autoExecLowRisk` 默认关闭，开启后 doctor/config 会警示，且**组合命令（含 `;` `|` `&&`）与命令替换（`$()` 反引号）永远不享受自动执行**。
 
 退出码约定：0 成功；1 未知错误；2 用法错误；3-7 config/exec/fs/network/permission 域；8 db；9 asset；10 agent；11 action。
 

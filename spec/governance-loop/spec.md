@@ -19,11 +19,20 @@
   3. 动作范围（scopes）：默认 `action:create`；`auto-exec-low` 允许低危自动执行。
 - key 无效 / paused / revoked / 过期 → `PERMISSION_DENIED`。
 
-### 风险分级
+### 风险分级（P0 加固后）
 - 三档：low / medium / high。AI 自报 `--risk-hint` **只升不降**：最终 = max(规则结果, hint)。
-- 判定顺序（先中先停）：① 策略文件白名单（命令归一化空白后**全等**）→ low，来源 `policy-whitelist`；② 策略文件规则（正则，可覆盖内置）；③ 内置保守规则（启发式：mkfs/dd/shutdown/reboot/rm -rf 根路径/drop database/truncate table/kubectl delete ns|nodes/管道进 shell → high；systemctl 变更类/kubectl delete|scale/docker 删除类/kill 类/chmod/chown/包卸载/git push --force → medium）；④ 兜底 low。
-- 策略文件 `skyport.policy.json`（cwd 约定）：`{ rules: [{pattern, level}], whitelist: [命令], autoExecLowRisk: bool }`，全部可选；非法文件 → `CONFIG_INVALID`（宁拒不猜）。
-- 路径映射：风险 low 且策略 autoExecLowRisk 且（agent 需含 `auto-exec-low` scope）→ 创建即自动批准并执行；medium/high → pending 等人。**human 的 `run` 直通不受风险拦截**（人是 root），但风险照算照记。
+- **策略文件只从 `~/.skyport/skyport.policy.json` 加载**（数据目录 0700，与 DB 同信任边界——被治理的 AI 与调用者同 UID，cwd 是它的可写区，禁止作为治理参数来源）；`SKYPORT_POLICY_PATH` 可显式指定（开启时启动 WARN）。`autoExecLowRisk` 默认 false，开启时 doctor 警示、config 可见。
+- **评估在 parseSegments() 的输出上做**（与执行层同一套引号语义，杜绝"评估看字符串、执行剥引号"两套语义）：
+  - 组合命令按未加引号的 `;` `|` `&&` `&` 切分段，逐段评估取最大值；
+  - 旗标按集合语义：`-rf` = `-r -f` = `--recursive --force`；引号包裹的旗标先剥引号；
+  - 结构规则：rm 递归+根/通配路径 → high，rm 递归 → medium；dd/mkfs/shutdown/reboot/halt/poweroff/init 0|6 → high；find -delete/-exec → high；mv/chmod 777/chown -R 于根 → high；systemctl 变更类/kubectl delete|scale/docker 删除类/kill 类/包卸载/git push --force → medium；
+  - 执行原语：任意段程序为 shell 且经管道进入 → high；解释器（bash/sh/python/node 等）带 -c/-e → 至少 medium；段内含 rmtree/os.system/subprocess/child_process → high；
+  - 地板规则：未加引号的反引号/`$(`（命令替换）→ 整体至少 medium；**无法静态确认结构的命令宁可 medium**；
+  - 兜底 low。
+- **白名单只对"单段且无命令替换"的命令生效**（全等比较）——`kubectl get pods; id` 这类加后缀的组合不吃白名单。
+- **自动执行资格**：多段或有命令替换 → 一律不具备 autoExecLowRisk 资格（即使整体 low 也要人工审批）。
+- **跳板治理**：任一段程序为 ssh/scp 时提取二级目标——目标是已登记资产且不在 agent 资产范围 → 门口拒绝；无法解析目标 → 强制 high。kubectl exec / docker exec / nsenter → high（上下文逃逸，无法静态分析）。
+- 路径映射：风险 low 且具备资格且策略 autoExecLowRisk 且（agent 需含 `auto-exec-low` scope）→ 创建即自动批准并执行；medium/high → pending 等人。**human 的 `run` 直通不受风险拦截**（人是 root），但风险照算照记。
 
 ### 执行
 - 唯一出口仍是 executor（超时/重试/截断/退出码归一化全复用）。SSH 目标：`ssh [-p port] <host> -- <参数数组>`，host:port 从资产 addr 解析，addr 也可直接填 `~/.ssh/config` 的别名；凭据一律走本机 SSH 配置。

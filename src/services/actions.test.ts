@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -33,6 +33,7 @@ beforeEach(async () => {
 afterEach(async () => {
   closeDb();
   delete process.env.SKYPORT_DB_PATH;
+  delete process.env.SKYPORT_POLICY_PATH;
   resetConfigCache();
   await rm(tempDir, { recursive: true, force: true });
 });
@@ -48,7 +49,8 @@ async function captureActionError(fn: () => unknown): Promise<string> {
 }
 
 function safeCommand(): string {
-  return `node -e "process.stdout.write('governed-ok')"`;
+  // 单段、无命令替换、低危——解释器 -c/-e 现在是 medium 地板（红队 R8），故用 printf
+  return 'printf governed-ok';
 }
 
 describe('actions 行动状态机与治理', () => {
@@ -172,5 +174,38 @@ describe('actions 行动状态机与治理', () => {
     const created = await createAction({ command: safeCommand(), actor: HUMAN, riskHint: 'high' });
     expect(created.action.riskLevel).toBe('high');
     expect(getAction(created.action.id).riskSource).toBe('default-low');
+  });
+
+  it('P0-S4：agent 命令内嵌跳板到未授权资产 → 门口拒绝；跳向授权资产则放行为 pending', async () => {
+    addAsset({ name: 't1', type: 'host', addr: '10.9.0.1' });
+    addAsset({ name: 't2', type: 'host', addr: '10.9.0.2' });
+    const issued = createAgent({ name: 't1only', assetPatterns: ['t1*'], riskCeiling: 'high', autoExecLow: false });
+    const actor: ActorRef = { type: 'agent', id: issued.agent.id, name: issued.agent.name };
+    expect(
+      await captureActionError(() => createAction({ command: 'ssh t2 "echo hi"', actor, target: 't1' })),
+    ).toBe('SKYPORT_PERMISSION_DENIED');
+    const allowed = await createAction({ command: 'ssh t1 "echo hi"', actor, target: 't1' });
+    expect(allowed.action.status).toBe('pending');
+    expect(allowed.action.riskLevel).toBe('medium');
+  });
+
+  it('P0-S14：组合命令即使 low 也无自动执行资格（策略开启时仍 pending）；单段 low 照常自动执行', async () => {
+    const policyFile = join(tempDir, 'skyport.policy.json');
+    await writeFile(policyFile, JSON.stringify({ autoExecLowRisk: true }), 'utf8');
+    process.env.SKYPORT_POLICY_PATH = policyFile;
+    resetConfigCache();
+    try {
+      const issued = createAgent({ name: 'autoer', assetPatterns: ['*'], riskCeiling: 'high', autoExecLow: true });
+      const actor: ActorRef = { type: 'agent', id: issued.agent.id, name: issued.agent.name };
+      const compound = await createAction({ command: 'hostname && uptime', actor });
+      expect(compound.action.status).toBe('pending');
+      expect(compound.action.riskLevel).toBe('low');
+      const single = await createAction({ command: 'printf auto-ok', actor });
+      expect(single.action.status).toBe('success');
+      expect(single.execution?.stdout).toBe('auto-ok');
+    } finally {
+      delete process.env.SKYPORT_POLICY_PATH;
+      resetConfigCache();
+    }
   });
 });

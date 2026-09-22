@@ -12,6 +12,7 @@ import { getConfig, loadConfig } from '../config/config';
 import { isSkyportError, type SkyportError } from '../errors/errors';
 import { formatLogEntry, rootLogger, type LogSink } from '../logger/logger';
 import { runDoctor } from '../services/doctor';
+import { defaultPolicyPath, loadPolicy } from '../services/risk';
 import { buildAgentCommand } from './commands/agents';
 import { buildActionCommand, buildApprovalCommands } from './commands/actions';
 import { buildAssetCommand, configureListCommand } from './commands/assets';
@@ -144,9 +145,22 @@ function buildProgram(): Command {
 
   program
     .command('config')
-    .description('打印生效配置（优先级：项目配置 > 环境变量 > 默认值）')
+    .description('打印生效配置与安全姿态（优先级：项目配置 > 环境变量 > 默认值）')
     .action(() => {
-      process.stdout.write(`${JSON.stringify(getConfig(), null, 2)}\n`);
+      const config = getConfig();
+      const policy = loadPolicy();
+      // 安全姿态可见性（红队 S15）：apiKey 只显示设置状态，策略关键项一目了然
+      const view = {
+        ...config,
+        apiKey: config.apiKey === undefined ? undefined : '***已设置***',
+        policy: {
+          path: config.policyPath ?? defaultPolicyPath(),
+          autoExecLowRisk: policy.autoExecLowRisk,
+          rules: policy.rules.length,
+          whitelist: policy.whitelist.length,
+        },
+      };
+      process.stdout.write(`${JSON.stringify(view, null, 2)}\n`);
     });
 
   return program;

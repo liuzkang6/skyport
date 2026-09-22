@@ -36,6 +36,9 @@ const configSchema = z.strictObject({
   apiKey: z.string().min(1).optional(),
   /** pending 行动的出站 webhook（SKYPORT_NOTIFY_WEBHOOK_URL）；未配置则不发送 */
   notifyWebhookUrl: z.string().min(1).optional(),
+  /** 风险策略文件显式路径（SKYPORT_POLICY_PATH）；缺省用 ~/.skyport/skyport.policy.json。
+   * 红队 S2：策略一律不读 cwd——cwd 是被治理方（同 UID 的 AI）可写区 */
+  policyPath: z.string().min(1).optional(),
 });
 
 export type SkyportConfig = z.infer<typeof configSchema>;
@@ -58,6 +61,7 @@ const ENV_KEY_TO_CONFIG_KEY: Readonly<Record<string, string>> = {
   SKYPORT_CHECK_TIMEOUT_MS: 'checkTimeoutMs',
   SKYPORT_API_KEY: 'apiKey',
   SKYPORT_NOTIFY_WEBHOOK_URL: 'notifyWebhookUrl',
+  SKYPORT_POLICY_PATH: 'policyPath',
 };
 
 export function defaultProjectConfigPath(): string {

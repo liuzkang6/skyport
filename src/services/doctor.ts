@@ -4,9 +4,10 @@
  */
 import { readJsonFileSync } from '../adapters/fs';
 import { getDb } from '../adapters/db';
-import { defaultProjectConfigPath, loadConfig, type SkyportConfig } from '../config/config';
+import { defaultProjectConfigPath, getConfig, loadConfig, type SkyportConfig } from '../config/config';
 import { ERROR_CODES, isSkyportError } from '../errors/errors';
 import { execute } from '../executor/executor';
+import { defaultPolicyPath, loadPolicy } from './risk';
 
 export interface DoctorCheck {
   readonly name: string;
@@ -25,6 +26,7 @@ export async function runDoctor(): Promise<DoctorReport> {
   checks.push(checkConfig());
   checks.push(checkProjectConfigFile());
   checks.push(checkDatabase());
+  checks.push(checkPolicy());
   return { ok: checks.every((check) => check.ok), checks };
 }
 
@@ -76,6 +78,22 @@ function checkDatabase(): DoctorCheck {
     return { name: 'database', ok: true, detail: `数据库就绪（schema v${row.v ?? 0}，WAL 模式）` };
   } catch (error) {
     return { name: 'database', ok: false, detail: describe(error) };
+  }
+}
+
+/** 安全姿态可见性（红队 S2）：策略位置、autoExecLowRisk 开启即警示 */
+function checkPolicy(): DoctorCheck {
+  try {
+    const policy = loadPolicy();
+    const path = getConfig().policyPath ?? defaultPolicyPath();
+    const flag = policy.autoExecLowRisk ? '，⚠ autoExecLowRisk 已开启：低危命令免审批自动执行' : '';
+    return {
+      name: 'policy',
+      ok: true,
+      detail: `策略 ${path}（rules=${policy.rules.length}，whitelist=${policy.whitelist.length}${flag}）`,
+    };
+  } catch (error) {
+    return { name: 'policy', ok: false, detail: describe(error) };
   }
 }
 

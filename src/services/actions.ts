@@ -8,11 +8,12 @@ import { createError, ERROR_CODES } from '../errors/errors';
 import {
   assertAgentMayCreateAction,
   getAgent,
+  globMatch,
   type ActorRef,
 } from './agents';
 import { executeAction, insertEvent, getLastExecution, type Execution } from './action-exec';
 import { notifyPendingAction } from './notify';
-import { getAsset } from './assets';
+import { getAsset, listAssets, parseAddr, type Asset } from './assets';
 import {
   applyHint,
   assessRisk,
@@ -132,14 +133,17 @@ export async function createAction(input: CreateActionInput): Promise<ActionResu
 
   if (input.actor.type === 'agent') {
     const agent = getAgent(input.actor.id);
-    // 自动执行资格也在这里一并校验（low + 策略开关 + scope）
+    // 自动执行资格 = low + 策略开关 + scope + 单段无命令替换（红队 S14：组合命令必须过人）
     const autoEligible =
       assessment.level === 'low' &&
+      assessment.autoExecEligible &&
       policy.autoExecLowRisk &&
       agent.scopes.includes('auto-exec-low') &&
       agent.scopes.includes('action:create');
     assertAgentMayCreateAction(agent, targetName, assessment.level, autoEligible);
   }
+  // 跳板治理（红队 S4）：ssh/scp 段的二级目标是已登记资产且不在 agent 范围 → 门口拒绝
+  assertPivotScope(input.actor, assessment.pivots);
 
   const now = new Date().toISOString();
   const action: Action = {
@@ -178,11 +182,13 @@ export async function createAction(input: CreateActionInput): Promise<ActionResu
     });
   insertEvent(action.id, 'created', input.actor, { risk: assessment.level, source: assessment.source, tokens: tokens.length });
 
-  // 低危 + 策略允许自动执行（human 直登也适用；人要审批可改策略 autoExecLowRisk=false）
-  const humanAuto = input.actor.type === 'human' && assessment.level === 'low' && policy.autoExecLowRisk;
+  // 低危 + 单段 + 策略允许自动执行（human 直登也适用；组合命令/命令替换一律无资格，红队 S14）
+  const humanAuto =
+    input.actor.type === 'human' && assessment.level === 'low' && assessment.autoExecEligible && policy.autoExecLowRisk;
   const agentAuto =
     input.actor.type === 'agent' &&
     assessment.level === 'low' &&
+    assessment.autoExecEligible &&
     policy.autoExecLowRisk &&
     getAgent(input.actor.id).scopes.includes('auto-exec-low');
   if (humanAuto || agentAuto) {
@@ -309,6 +315,36 @@ function expectPending(actionId: string, operation: string): Action {
 function requireHuman(actor: ActorRef, operation: string): void {
   if (actor.type !== 'human') {
     throw createError(ERROR_CODES.PERMISSION_DENIED, `${operation} 只允许人执行`, { context: { operation } });
+  }
+}
+
+/** 二级目标解析：跳板主机名对应哪台已登记资产（按名字或地址主机部分） */
+function findAssetByTarget(target: string): Asset | undefined {
+  const all = listAssets();
+  const byName = all.find((asset) => asset.name === target);
+  if (byName !== undefined) return byName;
+  return all.find((asset) => {
+    if (asset.addr === undefined) return false;
+    try {
+      return parseAddr(asset.addr, asset.connectMode).host === target;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** 人是 root 不做范围校验（风险地板仍由引擎给出）；agent 的跳板必须在授权资产范围内 */
+function assertPivotScope(actor: ActorRef, pivots: readonly string[]): void {
+  if (actor.type !== 'agent') return;
+  const agent = getAgent(actor.id);
+  for (const pivot of pivots) {
+    const asset = findAssetByTarget(pivot);
+    if (asset === undefined) continue; // 未登记主机：引擎已给 ≥medium，高危靠风险上限兜底
+    if (!agent.assetPatterns.some((pattern) => globMatch(pattern, asset.name))) {
+      throw createError(ERROR_CODES.PERMISSION_DENIED, `命令内嵌跳板目标不在 agent 资产授权范围: ${pivot}`, {
+        context: { agent: agent.name, pivot, patterns: agent.assetPatterns },
+      });
+    }
   }
 }
 

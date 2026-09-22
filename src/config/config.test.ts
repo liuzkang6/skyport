@@ -58,6 +58,16 @@ describe('config 配置体系', () => {
     expect(without.apiKey).toBeUndefined();
   });
 
+  it('正常路径：SKYPORT_POLICY_PATH 显式指定策略文件（红队 S2：默认不再读 cwd）', () => {
+    const config = loadConfig({
+      env: { SKYPORT_POLICY_PATH: '/etc/skyport/my.policy.json' },
+      configPath: absentConfigPath(),
+    });
+    expect(config.policyPath).toBe('/etc/skyport/my.policy.json');
+    const without = loadConfig({ env: {}, configPath: absentConfigPath() });
+    expect(without.policyPath).toBeUndefined();
+  });
+
   it('正常路径：SKYPORT_ 环境变量覆盖默认值，字符串自动强转为数字', () => {
     const config = loadConfig({
       env: { SKYPORT_EXEC_TIMEOUT_MS: '2500', SKYPORT_LOG_LEVEL: 'debug' },

@@ -31,5 +31,6 @@ describe('doctor 环境自检服务', () => {
     expect(names).toContain('config');
     expect(names).toContain('project-config-file');
     expect(names).toContain('database');
+    expect(names).toContain('policy');
   });
 });
