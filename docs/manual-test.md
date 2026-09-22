@@ -191,9 +191,10 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/alerts/stats
 - [x] MCP 适配器（7 工具/JSON-RPC stdio）
 - [x] 执行异步化（approveAsync + webhook 回推）
 - [x] 云 CLI 可操作（cloud-account → CLI 通道）
-- [ ] 节点 agent（Go）
+- [x] 节点 agent Go 骨架（~/skyport-node-agent/，心跳+能力声明，待编译部署）
+- [x] 态势包 v1（Context Pack：资产+检查+告警+行动+拓扑自动组装，REST 端点 /api/v1/context/:asset）
 - [x] 告警总线（Alerta 模型 + Alertmanager/Zabbix/原生 适配器 + ACK SLA + REST 端点）
-- [ ] 基线三相训练 + 态势包
+- [ ] 基线三相训练
 - [ ] 资产执行互斥 + 事件认领
 - [ ] Break-glass 兜底
 - [ ] 运行时认证（ZCode fork 集成 + 四角色）
