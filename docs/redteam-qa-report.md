@@ -1,6 +1,8 @@
 # skyport 红队 QA 审查报告（安全 + 人机体验）
 
 > **交付对象**：开发 Agent / 开发同学。本文档自包含，可直接按问题 ID 逐条修复。
+>
+> **⚠ 状态更新（2026-09-22 第二轮回归）**：第一轮全部 S1–S15 / U1–U8 已由开发侧修复并经黑盒复测确认（证据见[第七节](#七第二轮回归验证2026-09-22-修复后构建)）；当前遗留为新发现 **N1（`--json` 管道输出 64KiB 截断）**、**N2（远程执行引号剥离变形）** 及 3 条残留判级备注。
 > **被测版本**：skyport v0.1.0（M3），仓库 `/home/liu/skyport`，DB `~/.skyport/skyport.db`。
 > **测试日期**：2026-09-22。测试依据：`docs/redteam-test-plan.md` 全部用例（A–G）+ 攻击者模式扩展 + 值守运维人机体验专项。
 > **测试环境说明**：本机默认 node 为 v18.19.1，CLI 无法启动（见 S1），全部测试使用 `~/node22/bin/node`（v22.14.0）经 `bin/skyport.mjs` 执行。
@@ -288,3 +290,74 @@
 - 危险命令验证只需观察到 `riskLevel` 判级与门口行为即可，**切勿 approve** 破坏性 pending。
 - 修复后重点回归：第二节通过项基线（不要为修安全问题破坏已通过的行为）+ 本文档各条复现步骤的反向验证（期望行为出现）。
 - 建议为 S3 增加回归用例集：每条绕过变形 ≥ 1 个单测（`src/services/risk.test.ts`）。
+
+---
+
+## 七、第二轮回归验证（2026-09-22 修复后构建）
+
+> 前提：资产 t1/t2/t3 经授权可牺牲，本轮包含真机执行类验证。构建含 8 个修复提交（`040c695`…`2d89d41`）。
+> 结论：**S1–S15、U1–U8 全部修复确认，第一轮基线未回归劣化**；新发现 N1/N2 见下。
+
+### 7.1 修复确认表（黑盒复测证据）
+
+| ID | 状态 | 复测证据 |
+| --- | --- | --- |
+| S1 node 守卫 | ✅ 已修 | node18 下输出中文指引（"请改用高版本 node…例如 ~/node22/bin/node"），exit 2，无堆栈 |
+| S2 策略文件收权 | ✅ 已修 | cwd 策略文件失效，仅认 `~/.skyport/skyport.policy.json`；`config` 显示 policy 块；doctor 检查策略并在 autoExecLowRisk 开启时打 ⚠；CLI 启动还有 WARN"确认这是你想要的治理姿态"。攻击链复测：引号 rm 升 medium 挡在 low 门外，`echo` 类合法 low 正常 auto-exec，功能与安全兼顾 |
+| S3 风险引擎重写 | ✅ 已修 | 第一轮 8 条 low 绕过（`rm -r -f /`、`rm "-rf" x`、`bash -c rm\ -rf\ /`、`find / -delete`、`python rmtree`、`mv /`、`base64 -d \| sh`、变量间接）**全部 high 门口拒绝**；`echo hello` 仍 low 无误伤；引擎已改为 token 结构分析（旗标集合 + ROOTISH 操作数 + 段级规则） |
+| S4 跳板治理 | ✅ 已修 | 未授权跳板（t1\* agent → t2）门口拒绝，错误含 pivot 上下文；授权跳板（t\* agent → t2）放行为 pending（medium）。真机放行执行：t1→t2 不可达，10.7s 如实超时失败 exit 4，无重试放大 |
+| S5 chmod 副作用 | ✅ 已修 | `SKYPORT_DB_PATH=/tmp/s5dir/x.db`（775）执行后目录权限不变 |
+| S6 webhook 遮蔽 | ✅ 已修 | 载荷显示 `mysql -uadmin -p *** -e`，带 `"redacted":true` 标记 |
+| S7 失败退出码 | ✅ 已修 | `ls /nope` 失败 → exit 4（超时同样 exit 4） |
+| S8 批量错误包装 | ✅ 已修 | 重复 approve → exit 11，报错"当前状态为 success，不能 approve"，无"未知错误" |
+| S9 超时契约 | ✅ 已修 | `sleep 60`：10.7s 返回（不再重试放大），executions 记录 `attempts=1`、`duration_ms=10013` 如实 |
+| S10 审批 TOCTOU | ✅ 已修 | 源码改原子迁移（`UPDATE … WHERE status=?`，`claimTransition`）；5 进程并发 approve：恰 1 成功、4×exit 11、executions 1 行 |
+| S11 key 走 argv | ✅ 已修 | 新增 `--api-key-file`，help 明确建议文件/环境变量方式 |
+| S12 截断无标记 | ✅ 已修 | executions 新增 `stdout_truncated/stderr_truncated` 列（迁移 v3），20MB 输出记录 `stdout_truncated=1` |
+| S13 底层错误泄露 | ✅ 已修 | 重复建 agent → 纯中文"agent 名已存在"；zod 报错中文化（"超出长度/大小上限"）；技术细节默认隐藏（`SKYPORT_VERBOSE_ERRORS` 开启才显示）；CSV 导入报"JSON 解析失败"无 SyntaxError |
+| S14 分隔符兜底 low | ✅ 已修（按建议方案） | `kubectl get pods; id` 仍判 low，但**不再具备 auto-exec 资格**（实测进 pending 等审批），含分隔符命令必须过人 |
+| S15 杂项 | ✅ 已修 | `--wait-seconds -5` 拒绝（"需为非负整数"）；多行命令入库归一（展示与执行一致）；`config` 显示 policy 安全块；`agent list` 不再显示 key 提示 |
+| U1 看板截断 | ✅ 已修 | 截断行尾带"（skyport action show act_xxx 看全文）"提示，与 watch 共享行渲染 |
+| U2 内部 ID | ✅ 已修 | 看板/show/watch 均显示 `agent:rt-med`（名字） |
+| U3 值守无理由 | ✅ 已修 | pending 行尾显示"理由: 重载配置，变更单 CHG-xxx" |
+| U4 不能就地审批 | ✅ 已修 | watch 支持终端内就地审批，`--no-interactive` 可关，非终端自动禁用 |
+| U5 无过滤分页 | ✅ 已修 | `--agent/--target/--since/--limit` 全部就位，`--json` 带 `hasMore` 分页元数据 |
+| U6 等待无提示 | ✅ 已修 | 登记后立即打印"已登记 act_xxx（low），等待人工审批（最长 Ns）…" |
+| U7 无进度提示 | ✅ 已修 | 执行前打印"执行中（慢命令请等待，超时上限见配置）…" |
+| U8 导入报错 | ✅ 已修 | 同 S13，报"JSON 解析失败" |
+
+### 7.2 执行层端到端（资产可牺牲授权下，真机验证）
+
+| 验证点 | 结果 |
+| --- | --- |
+| medium 删除经审批真执行 | `rm -r -f /tmp/sac3`（引擎正确判 medium）→ 人工 approve → root 真删成功，闭环"分级→审批→执行→留痕"完整 |
+| 远程 shell 语义 | `;` 与 `$()` 由远程 shell 解释（`touch` 链执行、`$(id -u)` 展开为 0）；`$()` 已被引擎识别升 medium。本地执行仍 argv 直传无解释（`echo a;id` 原样输出）——本地/远程语义差异是 ssh 模型固有，靠引擎判级兜底 |
+| ProxyCommand 防线 | 恶意 addr 资产执行 → 如实失败 exit 4，选项未被解析 |
+
+### 7.3 新发现（本轮遗留，需要处理）
+
+#### N1〔严重〕`--json` 大输出经管道传输时被截断在 64KiB，JSON 非法
+
+- **场景**：行动数 ~146 条时 `skyport action list --json | jq .`（或任何 AI 消费者管道读取）
+- **期望**：完整合法 JSON（README 承诺"--json 供 AI 解析"，AI 集成必然走管道）
+- **实际**：管道接收**恰好 65536 字节**（一个 chunk），JSON 在字符串中间断掉解析失败；重定向到文件则完整（86712 字节，3/3 稳定复现）。典型 Node `process.exit()` 未等 stdout 冲刷的坑——管道是异步写，exit 时缓冲区被丢弃
+- **复现步骤**：1. 造 150+ 条行动 2. `skyport action list --json | wc -c`（=65536）3. `skyport action list --json > f; wc -c f`（完整）4. 管道结果 `jq .` 报错
+- **修复建议**：CLI 退出前显式 `process.stdout.write` 后等待 drain，或用 `process.exitCode = N` 替代 `process.exit(N)` 让 Node 自然退出冲刷；补一条 >64KB 输出的管道回归测试
+
+#### N2〔一般〕远程执行引号剥离变形：带空格的引号参数被拆成多个参数
+
+- **场景**：`skyport run --exec 'touch "/tmp/e2e q.txt"' --target t1`（远程 SSH 目标）
+- **期望**：远程创建单个文件 `/tmp/e2e q.txt`（审批人读到的命令语义）
+- **实际**：创建了 **`/tmp/e2e` 和 `q.txt` 两个文件**——tokenizer 剥引号后经 ssh 以空格拼接，带空格的引号参数被拆散。本地执行正确（argv 保真），仅远程变形。正确性 bug（审批人看到的语义 ≠ 实际执行语义）+ 安全隐患（"删除一个带空格的文件名"实际删两个路径）
+- **复现步骤**：1. `skyport run --exec 'touch "/tmp/a b.txt"' --target <ssh资产>` 2. 远程 `ls /tmp/a\ b.txt`（不存在）与 `/tmp/a`（存在）
+- **修复建议**：远程路径对含空格/元字符的 token 重新加引号（POSIX 单引号转义）后再传 ssh；或文档明示远程引号语义限制并在审批界面提示
+
+#### R 残留判级备注（低优先级，记录在案）
+
+- `truncate -s 0 /dev/sda`、`chmod -R 000 /` 停在 **medium**（设备截断/全盘去权可考虑升 high）
+- `kubectl get pods; id` 判 low：分隔符命令已禁 auto-exec（S14 方案生效），可再考虑含 `;` 时最低 medium
+- 内嵌 `ssh` 跳板执行若目标不可达/交互提示会挂到超时（本轮 t1→t2 即如此）——可考虑给内嵌 ssh 场景提示加 `-o BatchMode=yes` 的文档建议
+
+### 7.4 基线回归结果
+
+A1/A3/A5/A6、B1/B3/B4、D2、E1、E2（本地注入）、F1 全部保持通过，退出码与第一轮一致；doctor 五项（新增 policy 检查）全绿。第一轮修复未破坏任何已通过行为。
