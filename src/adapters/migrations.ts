@@ -240,5 +240,12 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 10,
+    up: (db) => {
+      // 事件认领（spec：v0.4 多人协作）
+      db.exec('ALTER TABLE actions ADD COLUMN assignee TEXT;');
+    },
+  },
 ];
 
