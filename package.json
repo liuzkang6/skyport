@@ -4,6 +4,9 @@
   "description": "skyport —— 类 Linear 的 AI 运维行动与治理平台（CLI 形态）",
   "type": "module",
   "private": true,
+  "bin": {
+    "skyport": "bin/skyport.mjs"
+  },
   "engines": {
     "node": ">=20",
     "pnpm": ">=9"
