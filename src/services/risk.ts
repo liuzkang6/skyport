@@ -161,10 +161,15 @@ function structuralFinding(tokens: readonly string[]): SegmentFinding {
   }
   if (prog === 'mv' && touchesRoot) return { level: 'high', matched: 'mv 根路径', pivot: undefined };
   if (prog === 'chmod') {
-    if (operands[0] === '777' && (operands[1] ?? '').startsWith('/')) {
-      return { level: 'high', matched: 'chmod 777 系统路径', pivot: undefined };
+    // 红队 R：777 放权与 000 去权作用于系统路径同等危险
+    if (['777', '000'].includes(operands[0] ?? '') && (operands[1] ?? '').startsWith('/')) {
+      return { level: 'high', matched: 'chmod 777/000 系统路径', pivot: undefined };
     }
     return { level: 'medium', matched: 'chmod', pivot: undefined };
+  }
+  if (prog === 'truncate' && operands.some((operand) => operand.startsWith('/dev/'))) {
+    // 红队 R：清空块设备等价于毁盘
+    return { level: 'high', matched: 'truncate 设备路径', pivot: undefined };
   }
   if (prog === 'chown') {
     if ((shortFlags.includes('R') || longFlags.includes('--recursive')) && touchesRoot) {

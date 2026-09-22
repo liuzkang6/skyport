@@ -35,7 +35,10 @@
 - 路径映射：风险 low 且具备资格且策略 autoExecLowRisk 且（agent 需含 `auto-exec-low` scope）→ 创建即自动批准并执行；medium/high → pending 等人。**human 的 `run` 直通不受风险拦截**（人是 root），但风险照算照记。
 
 ### 执行
-- 唯一出口仍是 executor（超时/重试/截断/退出码归一化全复用）。SSH 目标：`ssh [-p port] <host> -- <参数数组>`，host:port 从资产 addr 解析，addr 也可直接填 `~/.ssh/config` 的别名；凭据一律走本机 SSH 配置。
+- 唯一出口仍是 executor（超时/重试/截断/退出码归一化全复用）。
+- **本地执行**：命令切分为参数数组直 exec，不经 shell——`;` `|` `$()` 等元字符原样传给目标程序。
+- **SSH 执行**（红队 N2 加固）：**入库的原始命令字符串原样作为单一参数**交给 ssh，由远端 shell 解释——审批人读到的命令语义即远端实际执行语义（`touch "/tmp/a b.txt"` 创建单文件而非两个）；host:port 从资产 addr 解析，addr 也可直接填 `~/.ssh/config` 的别名；凭据一律走本机 SSH 配置；外层 ssh 固定 `BatchMode=yes`（密钥认证无交互，异常快速失败不挂死）。**命令里再内嵌 ssh 跳板时请自行加 `-o BatchMode=yes`**，否则内嵌连接可能交互挂到超时。
+- 判级补充（红队 R）：`truncate` 作用于 `/dev/*` 设备 → high；`chmod 777/000` 作用于系统路径 → high；**含分隔符命令维持 low 但永无自动执行资格**（刻意决策：升 medium 会误伤 `hostname && uptime` 类只读组合，审批负担换不来安全收益——兜底是"必须过人"本身）。
 - approve = 放行并**立即同步执行**（M2 无常驻调度），结果当场返回并落审计。
 
 ## 接口（CLI）

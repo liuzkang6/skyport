@@ -109,6 +109,11 @@ describe('risk 基线不回退（红队报告第二节通过项必须保持）',
     expect(levelOf('service nginx stop')).toBe('medium');
   });
 
+  it('红队 R 升级：truncate 设备路径 / chmod -R 000 / 判 high', () => {
+    expect(levelOf('truncate -s 0 /dev/sda')).toBe('high');
+    expect(levelOf('chmod -R 000 /')).toBe('high');
+  });
+
   it('只读命令仍 low 且具备自动执行资格（单段）', () => {
     for (const command of ['kubectl get pods -n prod', 'ls -la', 'hostname', 'printf ok']) {
       const assessment = assessRisk(command, noPolicy);

@@ -33,6 +33,8 @@ CLI 子命令（`skyport <命令>`）：`init`、`list`（资产清单，`--sele
 
 治理速览：AI 以 `--api-key`（或 `SKYPORT_API_KEY` / `--api-key-file`）发起行动 → 风险分级（低危且策略允许可自动执行；AI 自报风险只升不降）→ 中高危进 pending 等人（可配 `SKYPORT_NOTIFY_WEBHOOK_URL` 推送——载荷自动遮蔽命令中的密码/token；或 `skyport watch` 前台值守）→ `skyport approve <id>` 放行即执行 → 全程事件与执行留痕。执行契约：**超时默认不重试**（幂等命令可显式开 retryOnTimeout）、executions 如实记录总耗时/尝试次数/截断标志；**行动执行失败 CLI 退出码 4**，批量操作保留真实域码。风险策略放 **`~/.skyport/skyport.policy.json`**（数据目录 0700，**不从 cwd 读取**；`SKYPORT_POLICY_PATH` 可显式指定）；`autoExecLowRisk` 默认关闭，开启后 doctor/config 会警示，且组合命令与命令替换永远不享受自动执行。报错默认只出中文人话（`SKYPORT_VERBOSE_ERRORS=true` 显示底层技术细节）。
 
+执行语义：**本地**命令切参数数组直 exec（不经 shell）；**SSH 远程**把命令字符串**原样**交给远端 shell 解释——审批人看到的即远端实际执行的（含引号/重定向/管道语义）；外层 ssh 固定 `BatchMode=yes`，命令内嵌 ssh 跳板时建议自行加 `-o BatchMode=yes` 防交互挂死。
+
 退出码约定：0 成功；1 未知错误；2 用法错误（含 node 版本过低）；3-7 config/exec/fs/network/permission 域；8 db；9 asset；10 agent；11 action。行动执行失败统一按 4。
 
 ## 配置
