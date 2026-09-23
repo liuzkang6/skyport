@@ -1,4 +1,4 @@
-/** 应用根：启动会话探测 + 视图切换（登录/看板/资产/用量） */
+/** 应用根：启动会话探测 + 视图切换（登录/看板/操作台/资产/用量/审计） */
 import { useEffect } from 'react';
 import { useApp } from './store/app';
 import { AppShell } from './components/AppShell';
@@ -6,8 +6,12 @@ import { LoginPage } from './pages/LoginPage';
 import { BoardPage } from './pages/BoardPage';
 import { AssetsPage } from './pages/AssetsPage';
 import { UsagePage } from './pages/UsagePage';
+import { ConsolePage } from './pages/ConsolePage';
+import { AuditPage } from './pages/AuditPage';
 
-const ROUTES: Record<string, string> = { '/': 'board', '/assets': 'assets', '/usage': 'usage', '/login': 'login' };
+const ROUTES: Record<string, string> = {
+  '/': 'board', '/console': 'console', '/assets': 'assets', '/usage': 'usage', '/audit': 'audit', '/login': 'login',
+};
 
 export function App() {
   const view = useApp((s) => s.view);
@@ -34,7 +38,11 @@ export function App() {
   if (view === 'login') return <LoginPage />;
   return (
     <AppShell>
-      {view === 'assets' ? <AssetsPage /> : view === 'usage' ? <UsagePage /> : <BoardPage />}
+      {view === 'assets' ? <AssetsPage />
+        : view === 'usage' ? <UsagePage />
+        : view === 'console' ? <ConsolePage />
+        : view === 'audit' ? <AuditPage />
+        : <BoardPage />}
     </AppShell>
   );
 }

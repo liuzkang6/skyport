@@ -7,13 +7,14 @@ import { useApp } from '../store/app';
 
 const NAV_ITEMS: readonly { key: string; label: string; enabled: boolean; hint: string }[] = [
   { key: 'board', label: '动态', enabled: true, hint: '' },
+  { key: 'console', label: '操作台', enabled: true, hint: '' },
   { key: 'inbox', label: '收件箱', enabled: false, hint: '后续切片' },
   { key: 'approvals', label: '审批', enabled: false, hint: '后续切片' },
   { key: 'mine', label: '我的', enabled: false, hint: '后续切片' },
   { key: 'incidents', label: '事件', enabled: false, hint: '后续切片' },
   { key: 'assets', label: '资产', enabled: true, hint: '' },
   { key: 'knowledge', label: '知识库', enabled: false, hint: '后续切片' },
-  { key: 'audit', label: '审计', enabled: false, hint: '后续切片' },
+  { key: 'audit', label: '审计', enabled: true, hint: '' },
   { key: 'usage', label: '用量', enabled: true, hint: '' },
   { key: 'settings', label: '设置', enabled: false, hint: '后续切片' },
 ];
