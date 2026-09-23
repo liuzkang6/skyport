@@ -96,6 +96,32 @@ export function listUsers(): User[] {
   return rows.map(toUser);
 }
 
+function findUserRow(nameOrId: string): UserRow {
+  const row = getDb().prepare('SELECT * FROM users WHERE id = ? OR name = ?').get(nameOrId, nameOrId) as UserRow | undefined;
+  if (row === undefined) {
+    throw createError(ERROR_CODES.USER_NOT_FOUND, `用户不存在: ${nameOrId}`, { context: { target: nameOrId } });
+  }
+  return row;
+}
+
+/** 停用/启用（红队 V8）：停用同时吊销该用户全部 Web 会话——立即生效 */
+export function setUserStatus(nameOrId: string, status: 'active' | 'disabled'): User {
+  const row = findUserRow(nameOrId);
+  getDb().prepare('UPDATE users SET status = ?, updated_at = ? WHERE id = ?').run(status, new Date().toISOString(), row.id);
+  if (status === 'disabled') {
+    getDb().prepare('DELETE FROM web_sessions WHERE user_id = ?').run(row.id);
+  }
+  return { ...toUser(row), status, updatedAt: new Date().toISOString() };
+}
+
+/** 删除用户（红队 V8）：连会话一起清；建错了不必永远留着 */
+export function removeUser(nameOrId: string): User {
+  const row = findUserRow(nameOrId);
+  getDb().prepare('DELETE FROM web_sessions WHERE user_id = ?').run(row.id);
+  getDb().prepare('DELETE FROM users WHERE id = ?').run(row.id);
+  return toUser(row);
+}
+
 /**
  * 登录校验：成功返回 User 并清零失败计数；失败统一 PERMISSION_DENIED（防枚举）；
  * 锁定中 USER_LOCKED（可重试）；禁用 USER_DISABLED。

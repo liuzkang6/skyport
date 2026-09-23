@@ -46,10 +46,11 @@ describe('REST API v1（serve）', () => {
     expect(res.body.status).toBe('ok');
   });
 
-  it('认证：无令牌 → 403', async () => {
+  it('认证：无令牌 → 401（红队 V9：403 留给已认证但无权）', async () => {
     serve = await startServe({ port: 0 });
     const res = await fetchApi('/api/v1/assets');
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
+    expect(res.body.type).toBe('SKYPORT_AUTH_REQUIRED');
   });
 
   it('资产列表：带令牌 → 200 + 资产数组', async () => {
@@ -89,7 +90,7 @@ describe('REST API v1（serve）', () => {
   it('404：未知路径', async () => {
     serve = await startServe({ port: 0 });
     const res = await fetchApi('/api/v1/nonexistent');
-    expect(res.status).toBe(403); // 先被认证拦截
+    expect(res.status).toBe(401); // 先被认证拦截（401 语义，红队 V9）
   });
 });
 
@@ -251,6 +252,72 @@ describe('WebUI 会话与审批（spec/webui）', () => {
     const session = loginWithRefreshToken(issueRefreshToken(issued.agent.id));
     serve = await startServe({ port: 0 });
     const res = await fetchApi('/api/v1/actions/act_x/approve', session.token, { method: 'POST' });
+    expect(res.status).toBe(403);
+  });
+});
+
+// ── 读侧范围（红队 V5）：agent 令牌只见范围内的资产与行动 ──
+
+describe('REST 读侧资产范围（红队 V5）', () => {
+  function scopedSession(patterns: string[]): string {
+    const issued = createAgent({ name: `scoped-${patterns.join('-')}`, assetPatterns: patterns, riskCeiling: 'low', autoExecLow: false });
+    return loginWithRefreshToken(issueRefreshToken(issued.agent.id)).token;
+  }
+
+  it('资产列表：t1* agent 只见 t1，不见 t2/t3', async () => {
+    addAsset({ name: 't1', type: 'host', addr: '127.0.0.1:22', connectMode: 'local' });
+    addAsset({ name: 't2', type: 'host', addr: '127.0.0.1:23', connectMode: 'local' });
+    serve = await startServe({ port: 0 });
+    const res = await fetchApi('/api/v1/assets', scopedSession(['t1*']));
+    expect(res.status).toBe(200);
+    const names = (res.body.assets as { name: string }[]).map((a) => a.name);
+    expect(names).toContain('t1');
+    expect(names).not.toContain('t2');
+  });
+
+  it('资产详情：范围外 → 403', async () => {
+    addAsset({ name: 't1', type: 'host', addr: '127.0.0.1:22', connectMode: 'local' });
+    addAsset({ name: 't2', type: 'host', addr: '127.0.0.1:23', connectMode: 'local' });
+    serve = await startServe({ port: 0 });
+    const ok = await fetchApi('/api/v1/assets/t1', scopedSession(['t1*']));
+    expect(ok.status).toBe(200);
+    const denied = await fetchApi('/api/v1/assets/t2', scopedSession(['t1*']));
+    expect(denied.status).toBe(403);
+  });
+
+  it('行动列表：范围外目标的行动不出现；详情 → 403；态势包同理', async () => {
+    addAsset({ name: 't1', type: 'host', addr: '127.0.0.1:22', connectMode: 'local' });
+    addAsset({ name: 't3', type: 'host', addr: '127.0.0.1:24', connectMode: 'local' });
+    const onT1 = await createAction({ command: 'echo v5-t1', actor: { type: 'human', id: 'e2e', name: 'e2e' }, target: 't1', reason: 'v5' });
+    const onT3 = await createAction({ command: 'echo v5-t3', actor: { type: 'human', id: 'e2e', name: 'e2e' }, target: 't3', reason: 'v5' });
+    expect(onT1.action.status).toBe('pending');
+
+    serve = await startServe({ port: 0 });
+    const token = scopedSession(['t1*']);
+    const list = await fetchApi('/api/v1/actions', token);
+    expect(list.status).toBe(200);
+    const ids = (list.body.actions as { id: string }[]).map((a) => a.id);
+    expect(ids).toContain(onT1.action.id);
+    expect(ids).not.toContain(onT3.action.id);
+
+    const denied = await fetchApi(`/api/v1/actions/${onT3.action.id}`, token);
+    expect(denied.status).toBe(403);
+    const context = await fetchApi('/api/v1/context/t3', token);
+    expect(context.status).toBe(403);
+  });
+});
+
+// ── 告警投递门禁（红队 V7）：agent 令牌不能投递告警 ──
+
+describe('alerts 写门禁（红队 V7）', () => {
+  it('Bearer agent POST /alerts → 403（alerts:write 只属于 Web 会话角色）', async () => {
+    const issued = createAgent({ name: 'alert-agent', assetPatterns: ['*'], riskCeiling: 'medium', autoExecLow: false });
+    const session = loginWithRefreshToken(issueRefreshToken(issued.agent.id));
+    serve = await startServe({ port: 0 });
+    const res = await fetchApi('/api/v1/alerts', session.token, {
+      method: 'POST',
+      body: JSON.stringify([{ status: 'firing', labels: { alertname: 'v7', asset: 't1' } }]),
+    });
     expect(res.status).toBe(403);
   });
 });

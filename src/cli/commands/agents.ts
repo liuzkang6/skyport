@@ -35,6 +35,7 @@ interface RunOptions {
   readonly exec: string;
   readonly target?: string | undefined;
   readonly reason?: string | undefined;
+  readonly rollback?: string | undefined;
   readonly riskHint?: string | undefined;
   readonly waitSeconds?: string | undefined;
   readonly apiKey?: string | undefined;
@@ -116,6 +117,7 @@ export function buildAgentCommand(): Command {
     .requiredOption('--exec <command>', '要执行的命令（引号内空格会保留）')
     .option('--target <asset>', '目标资产（缺省本机）')
     .option('--reason <text>', '行动理由')
+    .option('--rollback <text>', '回滚声明（high 风险行动登记必填，spec/guardrails）')
     .addOption(new Option('--risk-hint <level>', '自报风险（只升不降）').choices([...RISK_LEVELS]))
     .option('--wait-seconds <seconds>', '等待审批的超时秒数（≥0，默认 120）', (value: string) => {
       const seconds = Number(value);
@@ -137,6 +139,7 @@ export function buildAgentCommand(): Command {
           actor,
           target: options.target,
           reason: options.reason,
+          rollback: options.rollback,
           riskHint: options.riskHint as RiskLevel | undefined,
         },
         waitMs,

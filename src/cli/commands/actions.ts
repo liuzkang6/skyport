@@ -25,6 +25,8 @@ interface CreateOptions {
   readonly exec: string;
   readonly target?: string | undefined;
   readonly reason?: string | undefined;
+  readonly rollback?: string | undefined;
+  readonly dryRun?: boolean | undefined;
   readonly riskHint?: string | undefined;
   readonly apiKey?: string | undefined;
   readonly apiKeyFile?: string | undefined;
@@ -97,6 +99,8 @@ export function buildActionCommand(): Command {
     .requiredOption('--exec <command>', '要执行的命令')
     .option('--target <asset>', '目标资产（缺省本机；host/cluster 走 SSH）')
     .option('--reason <text>', '行动理由')
+    .option('--rollback <text>', '回滚声明（high 风险行动登记必填，spec/guardrails）')
+    .option('--dry-run', '预演：只评级展示，不落库不执行')
     .addOption(new Option('--risk-hint <level>', '自报风险（只升不降）').choices([...RISK_LEVELS]))
     .option('--api-key <key>', 'API key（缺省读 SKYPORT_API_KEY；不带即 human 身份）')
     .option('--api-key-file <path>', '从文件读 API key（避免 argv 泄露，红队 S11）')
@@ -108,6 +112,8 @@ export function buildActionCommand(): Command {
         actor,
         target: options.target,
         reason: options.reason,
+        rollback: options.rollback,
+        dryRun: options.dryRun,
         riskHint: options.riskHint as RiskLevel | undefined,
       });
       if (options.json === true) printJson(result);
@@ -221,6 +227,7 @@ export function buildApprovalCommands(program: Command): void {
     .requiredOption('--exec <command>', '要执行的命令')
     .option('--target <asset>', '目标资产（缺省本机）')
     .option('--reason <text>', '行动理由')
+    .option('--rollback <text>', '回滚声明（high 风险直通同样必填，spec/guardrails）')
     .option('--json', '机器可读输出')
     .action(async (options: CreateOptions) => {
       const actor = requireHumanActor(currentApiKey(options.apiKey));
@@ -230,6 +237,7 @@ export function buildApprovalCommands(program: Command): void {
         actor,
         target: options.target,
         reason: options.reason,
+        rollback: options.rollback,
       });
       report(result, options.json === true);
     });

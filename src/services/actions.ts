@@ -317,7 +317,7 @@ function expireStalePending(action: Action): void {
   const ageMs = Date.now() - Date.parse(action.createdAt);
   if (ageMs > PENDING_EXPIRY_HOURS * 3_600_000) {
     claimTransition(action.id, 'pending', 'cancelled');
-    getDb().prepare('INSERT INTO action_events (action_id, event, actor_type, actor_id, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(action.id, 'expired', 'system', 'system', JSON.stringify({ reason: 'pending 超 24h 自动作废' }), new Date().toISOString());
+    insertEvent(action.id, 'expired', { type: 'system', id: 'system' }, { reason: `pending 超 ${PENDING_EXPIRY_HOURS}h 自动作废` });
     throw createError(ERROR_CODES.ACTION_INVALID_STATE, `行动 ${action.id} 已过期（pending 超 ${PENDING_EXPIRY_HOURS}h），自动作废`, { context: { actionId: action.id, ageHours: Math.round(ageMs / 3_600_000) } });
   }
 }

@@ -9,6 +9,7 @@ import { getDb } from '../adapters/db';
 import { createError, ERROR_CODES, isSkyportError } from '../errors/errors';
 import { execute, type ExecResult } from '../executor/executor';
 import { rootLogger } from '../logger/logger';
+import { appendChainedEvent, appendChainedExecution, type ActionEventType, type ChainActorType } from './audit-chain';
 import { getAsset, parseAddr } from './assets';
 import { tokenizeCommand } from './risk';
 
@@ -160,25 +161,19 @@ export async function executeAction(
     rootLogger.warn('行动执行失败', { actionId: action.id, error: errorMessage, attempts });
   }
   const now = new Date().toISOString();
-  const insert = getDb()
-    .prepare(
-      `INSERT INTO executions (action_id, ok, stdout, stderr, exit_code, timed_out, duration_ms, attempts, stdout_truncated, stderr_truncated, error, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      action.id,
-      ok ? 1 : 0,
-      stdout,
-      stderr,
-      exitCode ?? null,
-      timedOut ? 1 : 0,
-      durationMs,
-      attempts,
-      stdoutTruncated ? 1 : 0,
-      stderrTruncated ? 1 : 0,
-      errorMessage ?? null,
-      now,
-    );
+  // 红队 V3：执行记录经链化写入（seq/prev_hash/hash 全局单调链，verify 可检测任何删改）
+  const insertId = appendChainedExecution(action.id, {
+    ok,
+    stdout,
+    stderr,
+    exitCode: exitCode ?? null,
+    timedOut,
+    durationMs,
+    attempts,
+    stdoutTruncated,
+    stderrTruncated,
+    error: errorMessage ?? null,
+  });
   claimTransition(action.id, 'executing', ok ? 'success' : 'failed');
   insertEvent(action.id, 'exec-finished', actor, {
     ok,
@@ -188,7 +183,7 @@ export async function executeAction(
     timedOut,
   });
   return {
-    id: Number(insert.lastInsertRowid),
+    id: insertId,
     actionId: action.id,
     ok,
     stdout,
@@ -230,14 +225,12 @@ function rowToExecution(row: ExecutionRow): Execution {
   };
 }
 
-/** 事件只增不改：状态迁移的审计源 */
+/** 事件只增不改：状态迁移的审计源（红队 V3：一律链化写入，appendChainedEvent 是唯一实现） */
 export function insertEvent(
   actionId: string,
-  event: string,
-  actor: { readonly type: 'human' | 'agent'; readonly id: string },
+  event: ActionEventType,
+  actor: { readonly type: ChainActorType; readonly id: string },
   detail?: Readonly<Record<string, unknown>>,
 ): void {
-  getDb()
-    .prepare('INSERT INTO action_events (action_id, event, actor_type, actor_id, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(actionId, event, actor.type, actor.id, detail === undefined ? null : JSON.stringify(detail), new Date().toISOString());
+  appendChainedEvent(actionId, event, actor.type, actor.id, detail);
 }

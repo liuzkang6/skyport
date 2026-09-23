@@ -5,7 +5,8 @@
 import { Command, Option } from 'commander';
 import * as p from '@clack/prompts';
 import { getConfig } from '../../config/config';
-import { createUser, listUsers, USER_ROLES, type UserRole } from '../../services/users';
+import { createError, ERROR_CODES } from '../../errors/errors';
+import { createUser, listUsers, removeUser, setUserStatus, USER_ROLES, type UserRole } from '../../services/users';
 import { printJson } from '../render';
 
 interface AddUserOptions {
@@ -33,7 +34,8 @@ async function resolvePassword(): Promise<string> {
   }
   const fromEnv = getConfig().userPassword;
   if (fromEnv === undefined || fromEnv === '') {
-    throw new Error('非 TTY 环境：请设置 SKYPORT_USER_PASSWORD 提供密码');
+    // 红队 V8：域码化报错（config 域，exit 3），不再走"未知错误"
+    throw createError(ERROR_CODES.CONFIG_INVALID, '非 TTY 环境：请设置 SKYPORT_USER_PASSWORD 提供密码（或在终端交互输入）', { context: {} });
   }
   return fromEnv;
 }
@@ -75,6 +77,30 @@ export function buildUserCommand(): Command {
       for (const u of users) {
         process.stdout.write(`${u.name}\t${u.role}\t${u.status}\t${u.createdAt}\n`);
       }
+    });
+
+  user
+    .command('disable <target>')
+    .description('停用用户（name 或 ID；立即吊销其全部 Web 会话，登录被拒）')
+    .action((target: string) => {
+      const updated = setUserStatus(target, 'disabled');
+      process.stdout.write(`已停用 ${updated.name}（现有会话已全部吊销；user enable 可恢复）\n`);
+    });
+
+  user
+    .command('enable <target>')
+    .description('恢复被停用的用户')
+    .action((target: string) => {
+      const updated = setUserStatus(target, 'active');
+      process.stdout.write(`已恢复 ${updated.name}\n`);
+    });
+
+  user
+    .command('remove <target>')
+    .description('删除用户（name 或 ID；会话一并清除，不可恢复）')
+    .action((target: string) => {
+      const removed = removeUser(target);
+      process.stdout.write(`已删除 ${removed.name}（${removed.id}）\n`);
     });
 
   return user;

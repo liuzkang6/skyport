@@ -16,13 +16,14 @@ import { formatLogEntry, rootLogger, type LogSink } from '../logger/logger';
 import { runDoctor } from '../services/doctor';
 import { defaultPolicyPath, loadPolicy } from '../services/risk';
 import { backupDatabase } from '../services/backup';
-import { verifyAuditChain } from '../services/audit-chain';
+import { backfillAuditChain, verifyAuditChain } from '../services/audit-chain';
 import { buildAgentCommand } from './commands/agents';
 import { buildActionCommand, buildApprovalCommands } from './commands/actions';
 import { buildAssetCommand, configureListCommand } from './commands/assets';
 import { buildWatchCommand } from './commands/watch';
 import { buildUserCommand } from './commands/users';
 import { startServe } from './serve';
+import { startMcpServer } from './mcp';
 
 /** 退出码约定：0 成功；1 未知错误；2 用法错误；3-9 按错误域（config/exec/fs/network/permission/db/asset） */
 const EXIT_OK = 0;
@@ -35,10 +36,12 @@ const EXIT_BY_DOMAIN: readonly (readonly [string, number])[] = [
   ['SKYPORT_FS_', 5],
   ['SKYPORT_NETWORK_', 6],
   ['SKYPORT_PERMISSION_', 7],
+  ['SKYPORT_AUTH_', 7],
   ['SKYPORT_DB_', 8],
   ['SKYPORT_ASSET_', 9],
   ['SKYPORT_AGENT_', 10],
   ['SKYPORT_ACTION_', 11],
+  ['SKYPORT_USER_', 12],
 ];
 
 /** commander 自身展示 help/version 也走 exitOverride 抛出，这两类视为正常退出 */
@@ -171,19 +174,41 @@ function buildProgram(): Command {
       process.on('SIGTERM', shutdown);
     });
 
-  program
-    .command('audit')
-    .description('审计操作')
+  const audit = program.command('audit').description('审计操作');
+
+  audit
     .command('verify')
     .description('校验审计链完整性（任何单条删改都会断链）')
     .action(() => {
       const result = verifyAuditChain();
-      if (result.ok) {
-        process.stdout.write(`审计链完整（${result.checked} 条记录校验通过）\n`);
-      } else {
+      if (!result.ok) {
         process.stdout.write(`审计链断裂！${result.firstViolation?.table} seq=${result.firstViolation?.seq}：${result.firstViolation?.reason}\n`);
         process.exitCode = 1;
+        return;
       }
+      // 红队 V3：如实报告空链与未链化存量——"完整"不再掩盖"没链"
+      if (result.checked === 0 && result.unchained === 0) {
+        process.stdout.write('审计链为空（尚无链化记录，无记录可校验）\n');
+        return;
+      }
+      const unchainedNote =
+        result.unchained > 0
+          ? `\n⚠ 另有 ${result.unchained} 条存量记录未链化（链化前其删改不可检测）：skyport audit backfill 补链`
+          : '';
+      process.stdout.write(`审计链完整（${result.checked} 条链化记录校验通过）${unchainedNote}\n`);
+    });
+
+  audit
+    .command('backfill')
+    .description('把存量未链化的事件/执行记录按原序接入哈希链（幂等；补链前其删改不可检测）')
+    .action(() => {
+      const result = backfillAuditChain();
+      const total = result.chainedEvents + result.chainedExecutions;
+      if (total === 0) {
+        process.stdout.write('无未链化记录，链已是最新\n');
+        return;
+      }
+      process.stdout.write(`已补链 ${total} 条（事件 ${result.chainedEvents} / 执行 ${result.chainedExecutions}），运行 audit verify 校验\n`);
     });
 
   // 裸 skyport list 即资产清单（spec 约定）
@@ -194,6 +219,13 @@ function buildProgram(): Command {
   program.addCommand(buildUserCommand());
   buildApprovalCommands(program);
   buildWatchCommand(program);
+
+  program
+    .command('mcp')
+    .description('启动 MCP 适配器（stdio，供 MCP 客户端连接；令牌经 SKYPORT_API_KEY，与 REST 同源校验）')
+    .action(() => {
+      startMcpServer();
+    });
 
   program
     .command('doctor')

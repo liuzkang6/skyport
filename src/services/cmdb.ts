@@ -73,6 +73,29 @@ export function listServices(): Service[] {
   return (getDb().prepare('SELECT * FROM services ORDER BY name').all() as ServiceRow[]).map(rowToService);
 }
 
+/**
+ * 读侧范围（红队 V5）：agent 令牌只看到挂有范围内资产的服务；human 全量。
+ * scopePatterns === undefined 表示 human（不过滤）；agent 无模式（理论不可能，创建时 min(1)）返回空。
+ */
+export function listServicesScoped(scopePatterns: readonly string[] | undefined): Service[] {
+  if (scopePatterns === undefined) return listServices();
+  if (scopePatterns.length === 0) return [];
+  const globClauses = scopePatterns
+    .map(() => 'a.name GLOB ?')
+    .join(' OR ');
+  const globArgs = scopePatterns.map((pattern) => pattern.replace(/[?[\]]/g, (c) => `[${c}]`));
+  const rows = getDb()
+    .prepare(
+      `SELECT DISTINCT s.* FROM services s
+       JOIN asset_services x ON x.service_id = s.id
+       JOIN assets a ON a.id = x.asset_id
+       WHERE ${globClauses}
+       ORDER BY s.name`,
+    )
+    .all(...globArgs) as ServiceRow[];
+  return rows.map(rowToService);
+}
+
 export function removeService(nameOrId: string): void {
   const service = getService(nameOrId);
   getDb().prepare('DELETE FROM services WHERE id = ?').run(service.id);

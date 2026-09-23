@@ -5,16 +5,20 @@
  * 或 Web 会话 cookie skyport_session=skw_...（浏览器，角色四分门禁）。
  */
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
+import { createRequire } from 'node:module';
+// 版本号经 createRequire 解析：src（tsx 运行）与 dist（esbuild 产物）相对深度一致
+const pkg = createRequire(import.meta.url)('../../package.json') as { version: string };
 import { createError, ERROR_CODES, isSkyportError } from '../errors/errors';
 import { rootLogger } from '../logger/logger';
 import { resolveActorWithSessions } from '../services/credentials';
 import { listActions, getAction } from '../services/action-queries';
 import { listAssets, getAsset } from '../services/assets';
-import { listServices } from '../services/cmdb';
+import { listServicesScoped } from '../services/cmdb';
 import { verifyAuditChain } from '../services/audit-chain';
 import { detectAndParse, ingestAlert, listAlerts, ackAlert, closeAlert, getAlertStats } from '../services/alert-bus';
 import { buildContextPack, summarizeContextPack } from '../services/context-pack';
 import { approveAction, rejectAction } from '../services/actions';
+import { agentOrNull, assertActionVisible, assertAssetVisible, filterAssetsForActor } from '../services/read-scope';
 import {
   WEB_SESSION_COOKIE, can, issueWebSession, listUsers, revokeWebSession,
   verifyLogin, verifyWebSession, type User,
@@ -70,6 +74,8 @@ export function startServe(options: ServeOptions = {}): Promise<ServeResult> {
 }
 
 function mapErrorToStatus(type: string): number {
+  // 红队 V9：401 = 未认证（无凭证）；403 留给"认证了但无权"
+  if (type === ERROR_CODES.AUTH_REQUIRED) return 401;
   if (type.startsWith('SKYPORT_PERMISSION') || type === 'SKYPORT_USER_DISABLED') return 403;
   if (type === 'SKYPORT_USER_LOCKED') return 429;
   if (type === 'SKYPORT_USER_DUPLICATE_NAME' || type === 'SKYPORT_ACTION_INVALID_STATE') return 409;
@@ -118,11 +124,11 @@ function resolveAuth(req: IncomingMessage): RequestAuth | undefined {
   return { actor: { type: 'human', id: user.id, name: user.name }, user, cookieToken };
 }
 
-/** 认证中间件：无凭证返回 401（PERMISSION_DENIED） */
+/** 认证中间件：无凭证返回 401（AUTH_REQUIRED） */
 function requireAuth(req: IncomingMessage): RequestAuth {
   const auth = resolveAuth(req);
   if (auth === undefined) {
-    throw createError(ERROR_CODES.PERMISSION_DENIED, '缺少认证凭证（Bearer 或会话 cookie）', { context: {} });
+    throw createError(ERROR_CODES.AUTH_REQUIRED, '缺少认证凭证（Bearer 或会话 cookie）', { context: {} });
   }
   return auth;
 }
@@ -146,7 +152,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   // 健康检查（无需认证）
   if (method === 'GET' && path === '/api/v1/health') {
-    sendJson(res, 200, { status: 'ok', version: '0.3.0', timestamp: new Date().toISOString() });
+    sendJson(res, 200, { status: 'ok', version: pkg.version, timestamp: new Date().toISOString() });
     return;
   }
 
@@ -243,13 +249,15 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const actor = requireAuth(req);
 
   if (method === 'GET' && path === '/api/v1/assets') {
-    const assets = listAssets();
+    // 红队 V5：agent 令牌只看到自己资产范围内的资产（human/Web 会话全量）
+    const assets = filterAssetsForActor(actor.actor, listAssets());
     sendJson(res, 200, { assets, count: assets.length });
     return;
   }
 
   if (method === 'GET' && path.startsWith('/api/v1/assets/')) {
     const name = decodeURIComponent(path.split('/')[4] ?? '');
+    assertAssetVisible(actor.actor, name);
     sendJson(res, 200, getAsset(name));
     return;
   }
@@ -257,14 +265,16 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (method === 'GET' && path === '/api/v1/actions') {
     const status = url.searchParams.get('status') ?? undefined;
     const limit = Number(url.searchParams.get('limit') ?? '50');
-    const page = listActions({ status: status as never, limit });
+    const page = listActions({ status: status as never, limit, scopePatterns: agentOrNull(actor.actor)?.assetPatterns });
     sendJson(res, 200, page);
     return;
   }
 
-  if (method === 'GET' && path.startsWith('/api/v1/actions/')) {
+  if (method === 'GET' && path.startsWith('/api/v1/actions/') && !path.endsWith('/approve') && !path.endsWith('/reject')) {
     const id = decodeURIComponent(path.split('/')[4] ?? '');
-    sendJson(res, 200, getAction(id));
+    const found = getAction(id);
+    assertActionVisible(actor.actor, found);
+    sendJson(res, 200, found);
     return;
   }
 
@@ -287,7 +297,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   if (method === 'GET' && path === '/api/v1/services') {
-    sendJson(res, 200, { services: listServices() });
+    // 红队 V5：agent 只看到挂有范围内资产的服务（拓扑可见性与资产范围一致）
+    sendJson(res, 200, { services: listServicesScoped(agentOrNull(actor.actor)?.assetPatterns) });
     return;
   }
 
@@ -300,7 +311,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // ── 告警总线端点（spec/alert-bus）──
 
   if (method === 'POST' && path === '/api/v1/alerts') {
-    if (actor.user !== undefined) requireCapability(req, 'alerts:write');
+    // 红队 V7：alerts:write 只属于 Web 会话角色（approver/admin）——
+    // agent 令牌无角色能力集，投递告警一律 403（防止注入伪造告警制造告警疲劳）
+    requireCapability(req, 'alerts:write');
     const body = await readBody(req);
     const parsed = detectAndParse(body);
     if (parsed.length === 0) {
@@ -346,6 +359,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   if (method === 'GET' && path.startsWith('/api/v1/context/') && path.endsWith('/summary')) {
     const assetName = decodeURIComponent(path.split('/')[4] ?? '');
+    assertAssetVisible(actor.actor, assetName);
     const pack = buildContextPack(assetName);
     sendJson(res, 200, summarizeContextPack(pack));
     return;
@@ -353,6 +367,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   if (method === 'GET' && path.startsWith('/api/v1/context/')) {
     const assetName = decodeURIComponent(path.split('/')[4] ?? '');
+    assertAssetVisible(actor.actor, assetName);
     sendJson(res, 200, buildContextPack(assetName));
     return;
   }

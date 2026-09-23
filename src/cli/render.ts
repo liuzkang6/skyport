@@ -213,6 +213,14 @@ export function renderActionDetail(
 
 export function renderActionResult(result: ActionResult): string {
   const { action, execution } = result;
+  if (action.id === 'dry-run') {
+    // dry-run 预演（spec/guardrails）：只评级展示，不落库不执行——不能引导去 approve
+    return [
+      `dry-run 预演  ${paint(YELLOW, action.riskLevel)}（来源 ${action.riskSource}）  ${truncate(action.command, 60)}`,
+      paint(DIM, '未落库、未执行；high 风险正式登记需 --rollback 回滚声明'),
+      '',
+    ].join('\n');
+  }
   const head = `${action.id}  ${actionStatusText(action.status)}  ${paint(YELLOW, action.riskLevel)}  ${truncate(action.command, 60)}`;
   const lines = [head];
   if (execution === undefined) {
