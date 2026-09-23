@@ -79,6 +79,8 @@ export interface ListActionsFilter {
   readonly since?: string | undefined;
   readonly limit?: number | undefined;
   readonly offset?: number | undefined;
+  /** 读侧资产范围（红队 V5）：agent 令牌的 REST/MCP 查询按 glob 模式过滤目标；缺省不过滤 */
+  readonly scopePatterns?: readonly string[] | undefined;
 }
 
 export interface ActionPage {

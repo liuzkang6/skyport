@@ -79,8 +79,16 @@ export function listActions(filter: ListActionsFilter = {}): ActionPage {
     params.actor = actorKey;
     params.actorHuman = filter.actor;
   }
-  const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
-  const limit = filter.limit ?? DEFAULT_PAGE_SIZE;
+  if (filter.scopePatterns !== undefined && filter.scopePatterns.length > 0) {
+    // 读侧资产范围（红队 V5）：SQL 层过滤保证分页正确。
+    // GLOB 元字符（? [ ]）逐一转义成字符类，只留 * 作通配——与 globMatch 语义严格一致
+    const clauses = filter.scopePatterns.map((pattern, i) => {
+      params[`scope${i}`] = pattern.replace(/[?[\]]/g, (c) => `[${c}]`);
+      return `a.target_name GLOB @scope${i}`;
+    });
+    conditions.push(`(${clauses.join(' OR ')})`);
+  }
+  const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';  const limit = filter.limit ?? DEFAULT_PAGE_SIZE;
   const offset = filter.offset ?? 0;
   const rows = getDb()
     .prepare(`${ACTION_SELECT}${where} ORDER BY a.created_at DESC LIMIT @limit OFFSET @offset`)

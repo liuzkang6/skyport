@@ -150,10 +150,41 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
-  // 节点 agent 心跳（spec/node-agent：agent 用注册令牌认证，暂与 health 同级免认证，v2 加令牌验证）
+  // 节点 agent 心跳（spec/node-agent：记录心跳+采集指标→基线训练数据源）
   if (method === 'POST' && path === '/api/v1/agent/heartbeat') {
-    const body = (await readBody(req)) as { agent_id?: string; hostname?: string; capabilities?: string[] };
+    const body = (await readBody(req)) as {
+      agent_id?: string; hostname?: string; capabilities?: string[];
+      metrics?: { name: string; value: number }[];
+    };
+    // 按主机名关联资产并记录指标（基线三相训练的数据入口）
+    if (body.hostname !== undefined && Array.isArray(body.metrics)) {
+      const { getAsset } = await import('../services/assets');
+      const { recordMetricPoint } = await import('../services/baseline');
+      try {
+        const asset = getAsset(body.hostname);
+        for (const m of body.metrics) {
+          if (typeof m.name === 'string' && typeof m.value === 'number') {
+            recordMetricPoint(asset.id, m.name, m.value);
+          }
+        }
+      } catch { /* 主机未登记则跳过指标记录 */ }
+    }
     sendJson(res, 200, { status: 'ok', received: true, agentId: body.agent_id ?? 'unknown', timestamp: new Date().toISOString() });
+    return;
+  }
+
+  // SSE 事件流（spec/webui：实时推送告警/状态变更）
+  if (method === 'GET' && path === '/api/v1/events/stream') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write(`data: ${JSON.stringify({ event: 'connected', timestamp: new Date().toISOString() })}\n\n`);
+    const keepAlive = setInterval(() => {
+      res.write(`: keep-alive\n\n`);
+    }, 15_000);
+    req.on('close', () => clearInterval(keepAlive));
     return;
   }
 
@@ -323,6 +354,45 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (method === 'GET' && path.startsWith('/api/v1/context/')) {
     const assetName = decodeURIComponent(path.split('/')[4] ?? '');
     sendJson(res, 200, buildContextPack(assetName));
+    return;
+  }
+
+  // ── Token 用量看板（v0.5/v0.7）──
+  if (method === 'GET' && path === '/api/v1/usage/summary') {
+    const { getUsageSummary } = await import('../services/usage');
+    const hours = Number(url.searchParams.get('hours') ?? '24');
+    sendJson(res, 200, getUsageSummary(hours));
+    return;
+  }
+
+  // ── 插件管理（v0.5/v0.7）──
+  if (method === 'GET' && path === '/api/v1/plugins') {
+    const { listPlugins } = await import('../services/plugins');
+    sendJson(res, 200, { plugins: listPlugins() });
+    return;
+  }
+
+  // ── 基线查询（v0.4/v0.7）──
+  if (method === 'GET' && path.startsWith('/api/v1/baselines/')) {
+    const { getBaselines } = await import('../services/baseline');
+    const assetName = decodeURIComponent(path.split('/')[3] ?? '');
+    const { getAsset } = await import('../services/assets');
+    const asset = getAsset(assetName);
+    sendJson(res, 200, { baselines: getBaselines(asset.id) });
+    return;
+  }
+
+  // ── Analyzer 注册表（v0.5/v0.7）──
+  if (method === 'GET' && path === '/api/v1/analyzers') {
+    const { listAnalyzers } = await import('../services/analyzers');
+    sendJson(res, 200, { analyzers: listAnalyzers() });
+    return;
+  }
+
+  // ── 剧本列表（v0.6/v0.7）──
+  if (method === 'GET' && path === '/api/v1/playbooks') {
+    const { BUILTIN_PLAYBOOKS } = await import('../services/playbook');
+    sendJson(res, 200, { playbooks: BUILTIN_PLAYBOOKS.map((p) => ({ name: p.name, description: p.description, mode: p.mode, stepCount: p.steps.length })) });
     return;
   }
 
