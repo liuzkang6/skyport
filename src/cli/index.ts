@@ -22,6 +22,7 @@ import { buildActionCommand, buildApprovalCommands } from './commands/actions';
 import { buildAssetCommand, configureListCommand } from './commands/assets';
 import { buildWatchCommand } from './commands/watch';
 import { buildUserCommand } from './commands/users';
+import { startServe } from './serve';
 
 /** 退出码约定：0 成功；1 未知错误；2 用法错误；3-9 按错误域（config/exec/fs/network/permission/db/asset） */
 const EXIT_OK = 0;
@@ -149,6 +150,25 @@ function buildProgram(): Command {
       process.stdout.write(
         `已备份 ${result.path}（${result.bytes} 字节${result.pruned > 0 ? `，清理旧备份 ${result.pruned} 份` : ''}）\n`,
       );
+    });
+
+  program
+    .command('serve')
+    .description('启动 REST API + WebUI 前台服务（spec/webui 第一刀；守护化属 v0.4 后续）')
+    .option('--port <n>', '监听端口（默认 7100）')
+    .option('--host <addr>', '监听地址（默认 127.0.0.1）')
+    .action(async (options: { port?: string | undefined; host?: string | undefined }) => {
+      const port = options.port === undefined ? undefined : Number(options.port);
+      if (port !== undefined && (!Number.isInteger(port) || port <= 0 || port > 65535)) {
+        throw new Error('--port 需为 1~65535 整数');
+      }
+      const result = await startServe({ port, host: options.host });
+      process.stdout.write(`skyport REST API 已启动：http://${result.host}:${result.port}/ （Ctrl+C 退出）\n`);
+      const shutdown = () => {
+        result.server.close(() => process.exit(0));
+      };
+      process.on('SIGINT', shutdown);
+      process.on('SIGTERM', shutdown);
     });
 
   program

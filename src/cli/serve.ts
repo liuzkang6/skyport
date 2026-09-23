@@ -150,6 +150,11 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
+  // WebUI 静态托管（无需认证：页面外壳公开，数据全部经认证 API；非 /api 路径 SPA fallback）
+  if (!path.startsWith('/api/') && (method === 'GET' || method === 'HEAD') && serveStatic(res, path)) {
+    return;
+  }
+
   // ── Web 会话认证端点（spec/webui）──
 
   if (method === 'POST' && path === '/api/v1/auth/login') {
@@ -311,11 +316,6 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (method === 'GET' && path.startsWith('/api/v1/context/')) {
     const assetName = decodeURIComponent(path.split('/')[4] ?? '');
     sendJson(res, 200, buildContextPack(assetName));
-    return;
-  }
-
-  // ── WebUI 静态托管（API 未命中的非 /api 路径 → SPA）──
-  if (!path.startsWith('/api/') && (method === 'GET' || method === 'HEAD') && serveStatic(res, path)) {
     return;
   }
 
