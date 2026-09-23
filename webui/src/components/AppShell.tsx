@@ -20,18 +20,39 @@ const VIEW_HINTS: Readonly<Record<string, string>> = {
   settings: '设置 · 模型 / 保险箱 / 运行时 / 插件',
 };
 
-const NAV_ITEMS: readonly { key: string; label: string }[] = [
-  { key: 'board', label: '动态' },
-  { key: 'console', label: '操作台' },
-  { key: 'inbox', label: '收件箱' },
-  { key: 'mine', label: '我的' },
-  { key: 'incidents', label: '事件' },
-  { key: 'assets', label: '资产' },
-  { key: 'knowledge', label: '知识库' },
-  { key: 'audit', label: '审计' },
-  { key: 'governance', label: '治理' },
-  { key: 'usage', label: '用量' },
-  { key: 'settings', label: '设置' },
+/** 分节导航：节标题（工作区/资源/治理）+ 条目——结构对齐 Linear 式侧栏 */
+const NAV_SECTIONS: readonly { title: string; items: readonly { key: string; label: string }[] }[] = [
+  {
+    title: '工作区',
+    items: [
+      { key: 'board', label: '动态' },
+      { key: 'inbox', label: '收件箱' },
+      { key: 'mine', label: '我的' },
+      { key: 'console', label: '操作台' },
+    ],
+  },
+  {
+    title: '资源',
+    items: [
+      { key: 'incidents', label: '事件' },
+      { key: 'assets', label: '资产' },
+      { key: 'knowledge', label: '知识库' },
+    ],
+  },
+  {
+    title: '治理',
+    items: [
+      { key: 'audit', label: '审计' },
+      { key: 'governance', label: '治理' },
+      { key: 'usage', label: '用量' },
+    ],
+  },
+  {
+    title: '系统',
+    items: [
+      { key: 'settings', label: '设置' },
+    ],
+  },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -62,20 +83,27 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="px-4 pb-2 pt-4">
           <span className="text-ui-lg font-semibold">skyport</span>
         </div>
-        <ul className="flex-1 px-2">
-          {NAV_ITEMS.map((item) => (
-            <li key={item.key}>
-              <span
-                onClick={() => navigate(item.key as View)}
-                className={`flex h-8 cursor-pointer items-center rounded-lg px-3 text-ui-base ${
-                  view === item.key ? 'bg-selected font-medium text-foreground' : 'text-foreground hover:bg-hover'
-                }`}
-              >
-                {item.label}
-              </span>
-            </li>
+        <div className="flex-1 overflow-y-auto px-2 pb-4">
+          {NAV_SECTIONS.map((section) => (
+            <section key={section.title} className="mb-3">
+              <h3 className="px-3 pb-1 pt-2 text-ui-xs font-medium text-foreground-subtlest">{section.title}</h3>
+              <ul>
+                {section.items.map((item) => (
+                  <li key={item.key}>
+                    <span
+                      onClick={() => navigate(item.key as View)}
+                      className={`flex h-8 cursor-pointer items-center rounded-lg px-3 text-ui-base ${
+                        view === item.key ? 'bg-selected font-medium text-foreground' : 'text-foreground hover:bg-hover'
+                      }`}
+                    >
+                      {item.label}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
       </nav>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border bg-header px-4">

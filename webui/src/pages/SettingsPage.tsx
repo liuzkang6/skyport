@@ -68,18 +68,18 @@ export function SettingsPage() {
     finally { setTriggering(undefined); }
   }, [loadRuntimes]);
 
-  useEffect(() => {
-    if (tab === 'plugins') void loadVault();
-    if (tab === 'runtimes') void loadRuntimes();
-    if (tab === 'models') void loadModels();
-  }, [tab, loadVault, loadRuntimes, loadModels]);
-
   const loadModels = useCallback(async () => {
     try {
       const res = await fetch('/api/v1/models', { credentials: 'include' });
       if (res.ok) setModels(((await res.json()) as { models: ModelConfig[] }).models);
     } catch { /* 静默 */ }
   }, []);
+
+  useEffect(() => {
+    if (tab === 'plugins') void loadVault();
+    if (tab === 'runtimes') void loadRuntimes();
+    if (tab === 'models') void loadModels();
+  }, [tab, loadVault, loadRuntimes, loadModels]);
 
   const saveModel = useCallback(async () => {
     if (modelName.trim() === '' || modelBaseUrl.trim() === '' || modelId.trim() === '' || modelApiKey.trim() === '') {

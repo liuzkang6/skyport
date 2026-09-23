@@ -14,6 +14,7 @@ import { IncidentsPage } from './pages/IncidentsPage';
 import { KnowledgePage } from './pages/KnowledgePage';
 import { MinePage } from './pages/MinePage';
 import { GovernancePage } from './pages/GovernancePage';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export function App() {
   const view = useApp((s) => s.view);
@@ -36,6 +37,7 @@ export function App() {
   }
   if (view === 'login') return <LoginPage />;
   return (
+    <ErrorBoundary>
     <AppShell>
       {view === 'assets' ? <AssetsPage />
         : view === 'usage' ? <UsagePage />
@@ -49,5 +51,6 @@ export function App() {
         : view === 'governance' ? <GovernancePage />
         : <BoardPage />}
     </AppShell>
+    </ErrorBoundary>
   );
 }
