@@ -2,24 +2,37 @@
  * 应用外壳：侧栏导航（PRD 拍板命名——本刀只亮"动态"，其余占位置灰）+ 顶栏（主题切换/登出）。
  * 禁用项保留布局仅降文本色（DESIGN.md §5 菜单规则）。
  */
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { useApp } from '../store/app';
 
 const NAV_ITEMS: readonly { key: string; label: string; enabled: boolean; hint: string }[] = [
   { key: 'board', label: '动态', enabled: true, hint: '' },
   { key: 'console', label: '操作台', enabled: true, hint: '' },
-  { key: 'inbox', label: '收件箱', enabled: false, hint: '后续切片' },
-  { key: 'approvals', label: '审批', enabled: false, hint: '后续切片' },
-  { key: 'mine', label: '我的', enabled: false, hint: '后续切片' },
-  { key: 'incidents', label: '事件', enabled: false, hint: '后续切片' },
+  { key: 'inbox', label: '收件箱', enabled: true, hint: '' },
+  { key: 'approvals', label: '审批', enabled: true, hint: '' },
+  { key: 'mine', label: '我的', enabled: true, hint: '' },
+  { key: 'incidents', label: '事件', enabled: true, hint: '' },
   { key: 'assets', label: '资产', enabled: true, hint: '' },
-  { key: 'knowledge', label: '知识库', enabled: false, hint: '后续切片' },
+  { key: 'knowledge', label: '知识库', enabled: true, hint: '' },
   { key: 'audit', label: '审计', enabled: true, hint: '' },
   { key: 'usage', label: '用量', enabled: true, hint: '' },
   { key: 'settings', label: '设置', enabled: true, hint: '' },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
+  // SSE 实时事件流订阅（spec/webui：serve 推送 /api/v1/events/stream）
+  useEffect(() => {
+    const es = new EventSource('/api/v1/events/stream');
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data) as { event: string };
+        if (data.event === 'connected') return;
+        // 触发 store 刷新（不直接改状态，UI 自行拉取最新投影）
+        useApp.getState().refreshBoard().catch(() => undefined);
+      } catch { /* 忽略解析失败 */ }
+    };
+    return () => es.close();
+  }, []);
   const user = useApp((s) => s.user);
   const theme = useApp((s) => s.theme);
   const toggleTheme = useApp((s) => s.toggleTheme);

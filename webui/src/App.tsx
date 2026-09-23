@@ -9,9 +9,12 @@ import { UsagePage } from './pages/UsagePage';
 import { ConsolePage } from './pages/ConsolePage';
 import { AuditPage } from './pages/AuditPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { InboxPage } from './pages/InboxPage';
+import { IncidentsPage } from './pages/IncidentsPage';
+import { KnowledgePage } from './pages/KnowledgePage';
 
 const ROUTES: Record<string, string> = {
-  '/': 'board', '/console': 'console', '/assets': 'assets', '/usage': 'usage', '/audit': 'audit', '/settings': 'settings', '/login': 'login',
+  '/': 'board', '/console': 'console', '/assets': 'assets', '/usage': 'usage', '/audit': 'audit', '/settings': 'settings', '/inbox': 'inbox', '/incidents': 'incidents', '/knowledge': 'knowledge', '/login': 'login',
 };
 
 export function App() {
@@ -44,6 +47,9 @@ export function App() {
         : view === 'console' ? <ConsolePage />
         : view === 'audit' ? <AuditPage />
         : view === 'settings' ? <SettingsPage />
+        : view === 'inbox' ? <InboxPage />
+        : view === 'incidents' ? <IncidentsPage />
+        : view === 'knowledge' ? <KnowledgePage />
         : <BoardPage />}
     </AppShell>
   );
