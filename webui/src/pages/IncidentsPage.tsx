@@ -15,6 +15,8 @@ export function IncidentsPage() {
   const [alerts, setAlerts] = useState<readonly Alert[]>([]);
   const [statusFilter, setStatusFilter] = useState('');
   const [error, setError] = useState<string | undefined>(undefined);
+  const [busy, setBusy] = useState<string | undefined>(undefined);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     try {
@@ -27,6 +29,17 @@ export function IncidentsPage() {
   }, [statusFilter]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const mutate = useCallback(async (id: string, kind: 'ack' | 'close') => {
+    setBusy(id + kind);
+    setNotice(undefined);
+    try {
+      const res = await fetch(`/api/v1/alerts/${encodeURIComponent(id)}/${kind}`, { method: 'PATCH', credentials: 'include' });
+      if (res.ok) { setNotice(kind === 'ack' ? '已确认（认领处理中）' : '已关闭'); await load(); }
+      else setNotice(res.status === 403 ? '当前角色无权操作（需要 approver/admin）' : `操作失败: ${res.status}`);
+    } catch { setNotice('网络不可达'); }
+    finally { setBusy(undefined); }
+  }, [load]);
 
   if (error !== undefined) return <div className="p-6 text-ui-base text-destructive">{error}</div>;
 
@@ -46,6 +59,7 @@ export function IncidentsPage() {
         </select>
       </div>
 
+      {notice !== undefined && <div className="mb-3 text-ui-sm text-foreground-subtle">{notice}</div>}
       {alerts.length === 0 ? (
         <div className="text-ui-caption text-foreground-subtle">暂无事件</div>
       ) : (
@@ -58,6 +72,7 @@ export function IncidentsPage() {
               <th className="px-3 py-2 text-left">状态</th>
               <th className="px-3 py-2 text-left">来源</th>
               <th className="px-3 py-2 text-left">时间</th>
+              <th className="px-3 py-2 text-right">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -69,6 +84,15 @@ export function IncidentsPage() {
                 <td className="px-3 py-2">{a.status}</td>
                 <td className="px-3 py-2 text-foreground-subtle">{a.origin}</td>
                 <td className="px-3 py-2 text-foreground-subtle">{a.timestamp.slice(5, 16).replace('T', ' ')}</td>
+                <td className="px-3 py-2 text-right">
+                  {a.status === 'open' ? (
+                    <button type="button" disabled={busy === a.id + 'ack'} onClick={() => void mutate(a.id, 'ack')}
+                      className="rounded-lg border border-input-border px-2 py-0.5 text-ui-xs hover:bg-hover disabled:opacity-50">确认</button>
+                  ) : a.status === 'ack' ? (
+                    <button type="button" disabled={busy === a.id + 'close'} onClick={() => void mutate(a.id, 'close')}
+                      className="rounded-lg border border-input-border px-2 py-0.5 text-ui-xs hover:bg-hover disabled:opacity-50">关闭</button>
+                  ) : null}
+                </td>
               </tr>
             ))}
           </tbody>

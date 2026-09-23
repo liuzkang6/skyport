@@ -109,6 +109,20 @@ export function setFileMode(path: string, mode: number): void {
   }
 }
 
+/** 读目录条目名（不递归；目录不存在返回 undefined 供上层跳过） */
+export function listDirSync(path: string): string[] | undefined {
+  try {
+    return readdirSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+/** 读文本文件（UTF-8；不存在抛 SkyportError） */
+export function readTextFileSync(path: string): string {
+  return readFileSync(path, 'utf8');
+}
+
 export function fileExistsSync(path: string): boolean {
   return existsSync(path);
 }

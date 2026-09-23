@@ -6,23 +6,27 @@ import { useCallback, useEffect, useState } from 'react';
 interface PlaybookItem { name: string; description: string; mode: string; stepCount: number }
 interface AnalyzerItem { name: string; category: string; description: string; types: string[] }
 interface PluginItem { id: string; name: string; version: string; description: string | null; capabilities: string[]; enabled: boolean }
+interface SkillItem { name: string; description: string; file: string }
 
 export function KnowledgePage() {
   const [playbooks, setPlaybooks] = useState<readonly PlaybookItem[]>([]);
   const [analyzers, setAnalyzers] = useState<readonly AnalyzerItem[]>([]);
   const [plugins, setPlugins] = useState<readonly PluginItem[]>([]);
+  const [skills, setSkills] = useState<readonly SkillItem[]>([]);
   const [error, setError] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     try {
-      const [pb, az, pl] = await Promise.all([
+      const [pb, az, pl, sk] = await Promise.all([
         fetch('/api/v1/playbooks', { credentials: 'include' }),
         fetch('/api/v1/analyzers', { credentials: 'include' }),
         fetch('/api/v1/plugins', { credentials: 'include' }),
+        fetch('/api/v1/skills', { credentials: 'include' }),
       ]);
       if (pb.ok) setPlaybooks(((await pb.json()) as { playbooks: PlaybookItem[] }).playbooks);
       if (az.ok) setAnalyzers(((await az.json()) as { analyzers: AnalyzerItem[] }).analyzers);
       if (pl.ok) setPlugins(((await pl.json()) as { plugins: PluginItem[] }).plugins);
+      if (sk.ok) setSkills(((await sk.json()) as { skills: SkillItem[] }).skills);
       setError(undefined);
     } catch { setError('网络不可达'); }
   }, []);
@@ -37,11 +41,23 @@ export function KnowledgePage() {
 
       <div className="space-y-6">
         <section>
-          <h2 className="mb-2 text-ui-base font-medium">运维技能（SKILL.md）</h2>
-          <div className="rounded-lg border border-card-border bg-card p-3 text-ui-sm text-foreground-subtle">
-            技能文件位于 <code className="font-mono">skills/</code> 目录（磁盘清理/服务重启/日志调查/证书检查），
-            运行时通过角色模板加载。
-          </div>
+          <h2 className="mb-2 text-ui-base font-medium">运维技能（{skills.length}）</h2>
+          {skills.length === 0 ? (
+            <div className="rounded-lg border border-card-border bg-card p-3 text-ui-sm text-foreground-subtle">
+              技能目录为空（skills/ 下每个子目录一个 SKILL.md，含 name/description frontmatter）
+            </div>
+          ) : (
+            skills.map((s) => (
+              <div key={s.name} className="mb-2 rounded-lg border border-card-border bg-card p-3">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-ui-sm">{s.name}</span>
+                  <span className="rounded-md bg-tag px-1.5 py-0.5 text-ui-xs">SKILL</span>
+                </div>
+                <div className="mt-1 text-ui-caption text-foreground-subtle">{s.description}</div>
+                <div className="mt-1 font-mono text-ui-xs text-foreground-subtlest">{s.file}</div>
+              </div>
+            ))
+          )}
         </section>
 
         <section>

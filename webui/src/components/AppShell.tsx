@@ -5,6 +5,21 @@
 import { useEffect, type ReactNode } from 'react';
 import { useApp, type View } from '../store/app';
 
+/** 顶栏语境提示：随当前视图切换 */
+const VIEW_HINTS: Readonly<Record<string, string>> = {
+  board: '行动看板 · 列 = 治理状态机',
+  console: 'Agent 操作台 · 态势包 + AI 巡查 + 就地审批',
+  inbox: '收件箱 · 待我处理的更新',
+  mine: '我的 · 我创建的行动',
+  incidents: '事件 · 告警流（确认 / 关闭）',
+  assets: '资产 · 清单与健康',
+  knowledge: '知识库 · 技能与剧本',
+  audit: '审计 · 哈希链账本',
+  governance: '治理 · 月报与交接班',
+  usage: '用量 · Token 消耗',
+  settings: '设置 · 模型 / 保险箱 / 运行时 / 插件',
+};
+
 const NAV_ITEMS: readonly { key: string; label: string }[] = [
   { key: 'board', label: '动态' },
   { key: 'console', label: '操作台' },
@@ -65,7 +80,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border bg-header px-4">
           <span className="truncate text-ui-caption text-foreground-subtle">
-            {boardError !== undefined ? <span className="text-warning">{boardError}（自动重试中）</span> : '行动看板 · 列 = 治理状态机'}
+            {boardError !== undefined ? <span className="text-warning">{boardError}（自动重试中）</span> : (VIEW_HINTS[view] ?? view)}
           </span>
           <div className="flex shrink-0 items-center gap-2 text-ui-caption text-foreground-subtle">
             <span className="font-mono">{user?.name}</span>

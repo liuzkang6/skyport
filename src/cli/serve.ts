@@ -487,7 +487,10 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const id = decodeURIComponent(path.split('/')[4] ?? '');
     const found = getAction(id);
     assertActionVisible(actor.actor, found);
-    sendJson(res, 200, found);
+    // 详情完整视图：行动 + 最近执行结果 + 事件时间线（WebUI 详情抽屉消费）
+    const { getLastExecution } = await import('../services/action-exec');
+    const { getActionEvents } = await import('../services/action-queries');
+    sendJson(res, 200, { action: found, execution: getLastExecution(id), events: getActionEvents(id) });
     return;
   }
 
@@ -696,6 +699,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   // ── 剧本列表（v0.6/v0.7）──
+  // ── 技能注册表（spec/llm-seat：skills/*/SKILL.md frontmatter）──
+  if (method === 'GET' && path === '/api/v1/skills') {
+    const { listSkills } = await import('../services/skills-registry');
+    sendJson(res, 200, { skills: listSkills() });
+    return;
+  }
+
   if (method === 'GET' && path === '/api/v1/playbooks') {
     const { BUILTIN_PLAYBOOKS } = await import('../services/playbook');
     sendJson(res, 200, { playbooks: BUILTIN_PLAYBOOKS.map((p) => ({ name: p.name, description: p.description, mode: p.mode, stepCount: p.steps.length })) });

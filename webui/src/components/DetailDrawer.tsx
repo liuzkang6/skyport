@@ -27,11 +27,40 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+interface ExecutionDetail {
+  ok: boolean; stdout: string; stderr: string; exitCode: number | null;
+  timedOut: boolean; durationMs: number; attempts: number; error: string | null;
+}
+interface EventItem { id: number; event: string; actorType: string; actorId: string; detail: string | null; createdAt: string }
+
+const EVENT_LABEL: Record<string, string> = {
+  created: '创建', 'auto-approved': '低危自动放行', approved: '批准', 'direct-run': '直接执行',
+  rejected: '否决', cancelled: '取消', expired: '过期', 'exec-started': '开始执行',
+  'exec-finished': '执行完成', 'zombie-reconciled': '僵尸对账',
+};
+
 export function DetailDrawer({ action, userRole, onClose, onMutated }: DetailDrawerProps) {
   const [note, setNote] = useState('');
   const [feedback, setFeedback] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [execution, setExecution] = useState<ExecutionDetail | undefined>(undefined);
+  const [events, setEvents] = useState<readonly EventItem[]>([]);
   const approver = userRole !== undefined && can(userRole as never, 'action:approve');
+
+  // 详情完整视图：执行结果 + 事件时间线（列表对象只有状态，输出要单独拉）
+  useEffect(() => {
+    setExecution(undefined);
+    setEvents([]);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/v1/actions/${encodeURIComponent(action.id)}`, { credentials: 'include' });
+        if (!res.ok) return;
+        const body = (await res.json()) as { execution?: ExecutionDetail; events?: EventItem[] };
+        setExecution(body.execution);
+        setEvents(body.events ?? []);
+      } catch { /* 静默：详情失败不阻塞审批 */ }
+    })();
+  }, [action.id, action.status]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -95,6 +124,47 @@ export function DetailDrawer({ action, userRole, onClose, onMutated }: DetailDra
         </Row>
         <Row label="创建">{new Date(action.createdAt).toLocaleString('zh-CN', { hour12: false })}</Row>
       </dl>
+
+      {execution !== undefined ? (
+        <section aria-label="执行结果" className="rounded-lg border border-card-border bg-surface p-3">
+          <div className="mb-2 flex items-center gap-2 text-ui-xs text-foreground-subtle">
+            <span className={execution.ok ? 'text-positive' : 'text-destructive'}>{execution.ok ? '● 成功' : '● 失败'}</span>
+            <span>退出码 {execution.exitCode ?? '—'}</span>
+            <span>耗时 {execution.durationMs}ms</span>
+            <span>尝试 {execution.attempts} 次</span>
+            {execution.timedOut ? <span className="text-warning">超时击杀</span> : null}
+          </div>
+          {execution.stdout !== '' ? (
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-background-alt p-2 font-mono text-ui-xs">{execution.stdout}</pre>
+          ) : null}
+          {execution.stderr !== '' ? (
+            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-all rounded bg-background-alt p-2 font-mono text-ui-xs text-destructive">{execution.stderr}</pre>
+          ) : null}
+          {execution.error !== null && execution.error !== '' ? (
+            <p className="mt-1 text-ui-xs text-destructive">{execution.error}</p>
+          ) : null}
+          {execution.stdout === '' && execution.stderr === '' && execution.error === null ? (
+            <p className="text-ui-xs text-foreground-subtlest">（无输出）</p>
+          ) : null}
+        </section>
+      ) : action.status === 'success' || action.status === 'failed' ? (
+        <p className="text-ui-caption text-foreground-subtlest">执行结果加载中…</p>
+      ) : null}
+
+      {events.length > 0 ? (
+        <section aria-label="事件时间线" className="rounded-lg border border-card-border bg-surface p-3">
+          <h3 className="mb-2 text-ui-xs font-medium text-foreground-subtle">治理时间线</h3>
+          <ol className="space-y-1">
+            {events.map((e) => (
+              <li key={e.id} className="flex items-baseline gap-2 text-ui-xs">
+                <span className="shrink-0 font-mono text-foreground-subtlest">{e.createdAt.slice(11, 19)}</span>
+                <span className="shrink-0 font-medium">{EVENT_LABEL[e.event] ?? e.event}</span>
+                <span className="truncate text-foreground-subtle">{e.actorType}:{e.actorId}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
 
       {feedback !== undefined ? (
         <p role="status" className="rounded-lg bg-surface px-3 py-1.5 text-ui-caption">{feedback}</p>
