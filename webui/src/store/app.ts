@@ -7,7 +7,7 @@ import { api, onUnauthorized } from '../api/client';
 import type { ApiAction, ApiUser } from '../api/types';
 import type { UserRole } from '../lib/governance';
 
-export type View = 'login' | 'board';
+export type View = 'login' | 'board' | 'assets' | 'usage';
 export type Theme = 'light' | 'dark';
 
 interface AppState {
@@ -56,7 +56,8 @@ export const useApp = create<AppState>((set, get) => ({
 
   navigate: (view) => {
     set({ view });
-    history.pushState(null, '', view === 'login' ? '/login' : '/');
+    const path = view === 'login' ? '/login' : view === 'assets' ? '/assets' : view === 'usage' ? '/usage' : '/';
+    history.pushState(null, '', path);
   },
 
   login: async (username, password) => {

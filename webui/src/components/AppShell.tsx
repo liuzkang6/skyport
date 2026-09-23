@@ -11,9 +11,10 @@ const NAV_ITEMS: readonly { key: string; label: string; enabled: boolean; hint: 
   { key: 'approvals', label: '审批', enabled: false, hint: '后续切片' },
   { key: 'mine', label: '我的', enabled: false, hint: '后续切片' },
   { key: 'incidents', label: '事件', enabled: false, hint: '后续切片' },
-  { key: 'assets', label: '资产', enabled: false, hint: '后续切片' },
+  { key: 'assets', label: '资产', enabled: true, hint: '' },
   { key: 'knowledge', label: '知识库', enabled: false, hint: '后续切片' },
   { key: 'audit', label: '审计', enabled: false, hint: '后续切片' },
+  { key: 'usage', label: '用量', enabled: true, hint: '' },
   { key: 'settings', label: '设置', enabled: false, hint: '后续切片' },
 ];
 
@@ -23,6 +24,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const toggleTheme = useApp((s) => s.toggleTheme);
   const logout = useApp((s) => s.logout);
   const boardError = useApp((s) => s.boardError);
+  const view = useApp((s) => s.view);
+  const navigate = useApp((s) => s.navigate);
 
   return (
     <div className="flex h-full min-h-0">
@@ -36,9 +39,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span
                 aria-disabled={item.enabled ? undefined : true}
                 title={item.enabled ? undefined : item.hint}
+                onClick={item.enabled ? () => navigate(item.key as never) : undefined}
                 className={`flex h-8 items-center rounded-lg px-3 text-ui-base ${
                   item.enabled
-                    ? 'cursor-pointer bg-selected font-medium text-foreground'
+                    ? `cursor-pointer font-medium ${view === item.key ? 'bg-selected text-foreground' : 'text-foreground hover:bg-hover'}`
                     : 'cursor-default text-foreground-subtlest'
                 }`}
               >
