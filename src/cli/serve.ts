@@ -419,6 +419,22 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
+
+  // ── 治理月报 + 交接班（v0.7）──
+  if (method === 'GET' && path === '/api/v1/governance/report') {
+    const { generateReport } = await import('../services/governance');
+    const hours = Number(url.searchParams.get('hours') ?? '720');
+    sendJson(res, 200, generateReport(hours));
+    return;
+  }
+
+  if (method === 'POST' && path === '/api/v1/handover') {
+    const { createHandover } = await import('../services/governance');
+    const body = (await readBody(req)) as { notes?: string };
+    sendJson(res, 200, createHandover(body.notes ?? ''));
+    return;
+  }
+
   sendJson(res, 404, { error: `Not found: ${method} ${path}` });
 }
 
