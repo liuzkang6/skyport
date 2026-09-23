@@ -8,6 +8,7 @@ import { defaultProjectConfigPath, getConfig, loadConfig, type SkyportConfig } f
 import { ERROR_CODES, isSkyportError } from '../errors/errors';
 import { execute } from '../executor/executor';
 import { defaultPolicyPath, loadPolicy } from './risk';
+import { ZOMBIE_THRESHOLD_MINUTES } from './reconciliation';
 
 export interface DoctorCheck {
   readonly name: string;
@@ -27,7 +28,26 @@ export async function runDoctor(): Promise<DoctorReport> {
   checks.push(checkProjectConfigFile());
   checks.push(checkDatabase());
   checks.push(checkPolicy());
+  checks.push(checkZombies());
   return { ok: checks.every((check) => check.ok), checks };
+}
+
+/** 僵尸可见性（v0.3.x 僵尸对账）：doctor 只诊断不修复，发现即提示跑 reconcile */
+function checkZombies(): DoctorCheck {
+  try {
+    const cutoff = new Date(Date.now() - ZOMBIE_THRESHOLD_MINUTES * 60_000).toISOString();
+    const row = getDb()
+      .prepare("SELECT COUNT(*) AS n FROM actions WHERE status = 'executing' AND updated_at < ?")
+      .get(cutoff) as { n: number };
+    const hint = row.n > 0 ? `，⚠ ${row.n} 条超时执行中行动待对账（skyport reconcile / serve 每 5 分钟自动对账）` : '';
+    return {
+      name: 'zombie-actions',
+      ok: true,
+      detail: `执行中行动对账：超时阈值 ${ZOMBIE_THRESHOLD_MINUTES} 分钟${hint}`,
+    };
+  } catch (error) {
+    return { name: 'zombie-actions', ok: false, detail: describe(error) };
+  }
 }
 
 async function checkNodeRuntime(): Promise<DoctorCheck> {

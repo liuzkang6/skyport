@@ -16,6 +16,7 @@ export const ACTION_EVENT_TYPES = [
   'expired',
   'exec-started',
   'exec-finished',
+  'zombie-reconciled',
 ] as const;
 export type ActionEventType = (typeof ACTION_EVENT_TYPES)[number];
 

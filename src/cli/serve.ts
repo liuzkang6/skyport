@@ -24,7 +24,26 @@ import {
   verifyLogin, verifyWebSession, type User,
 } from '../services/users';
 import type { ActorRef } from '../services/agents';
+import { reconcileZombies } from '../services/reconciliation';
 import { serveStatic } from './static';
+
+/** 僵尸对账周期：网关常驻期间每 5 分钟自愈一次 */
+const RECONCILE_INTERVAL_MS = 5 * 60_000;
+
+/** SSE 活动连接表：broadcastEvent 的推送目标（连接断开自动摘除） */
+const sseClients = new Set<ServerResponse>();
+
+/** 向所有已连接的 Web UI 客户端推送一条事件（无连接时静默丢弃） */
+function broadcastEvent(payload: Readonly<Record<string, unknown>>): void {
+  const line = `data: ${JSON.stringify({ ...payload, timestamp: new Date().toISOString() })}\n\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(line);
+    } catch {
+      sseClients.delete(res);
+    }
+  }
+}
 
 export interface ServeOptions {
   readonly port?: number | undefined;
@@ -70,6 +89,17 @@ export function startServe(options: ServeOptions = {}): Promise<ServeResult> {
       rootLogger.info('REST API 启动', { port: actualPort, host });
       resolve({ server, port: actualPort, host });
     });
+
+    // 僵尸对账（v0.3.x）：网关常驻后每 5 分钟自愈超时 executing 行动；随 server 关闭停止
+    const zombieTimer = setInterval(() => {
+      try {
+        const report = reconcileZombies();
+        if (report.reconciled > 0) broadcastEvent({ event: 'zombie-reconciled', report });
+      } catch (error) {
+        rootLogger.warn('僵尸对账执行失败', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }, RECONCILE_INTERVAL_MS);
+    server.on('close', () => clearInterval(zombieTimer));
   });
 }
 
@@ -187,7 +217,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
-  // SSE 事件流（spec/webui：实时推送告警/状态变更）
+  // SSE 事件流（spec/webui：实时推送告警/状态变更；连接注册进表，broadcastEvent 全体推送）
   if (method === 'GET' && path === '/api/v1/events/stream') {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -195,10 +225,14 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       Connection: 'keep-alive',
     });
     res.write(`data: ${JSON.stringify({ event: 'connected', timestamp: new Date().toISOString() })}\n\n`);
+    sseClients.add(res);
     const keepAlive = setInterval(() => {
       res.write(`: keep-alive\n\n`);
     }, 15_000);
-    req.on('close', () => clearInterval(keepAlive));
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      sseClients.delete(res);
+    });
     return;
   }
 
@@ -272,8 +306,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   if (method === 'GET' && path === '/api/v1/actions') {
     const status = url.searchParams.get('status') ?? undefined;
+    const actorFilter = url.searchParams.get('actor') ?? undefined; // "我的"视图：按创建者过滤（红队 U5：human 用户名或 agent 名）
     const limit = Number(url.searchParams.get('limit') ?? '50');
-    const page = listActions({ status: status as never, limit, scopePatterns: agentOrNull(actor.actor)?.assetPatterns });
+    const page = listActions({ status: status as never, actor: actorFilter, limit, scopePatterns: agentOrNull(actor.actor)?.assetPatterns });
     sendJson(res, 200, page);
     return;
   }
@@ -291,6 +326,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const auth = requireCapability(req, 'action:approve');
     const id = decodeURIComponent(path.split('/')[4] ?? '');
     const result = await approveAction(id, auth.actor);
+    broadcastEvent({ event: 'action-approved', actionId: id, by: auth.actor.id });
     sendJson(res, 200, result);
     return;
   }
@@ -300,6 +336,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const id = decodeURIComponent(path.split('/')[4] ?? '');
     const body = (await readBody(req)) as { note?: unknown };
     const action = rejectAction(id, auth.actor, typeof body.note === 'string' && body.note !== '' ? body.note : undefined);
+    broadcastEvent({ event: 'action-rejected', actionId: id, by: auth.actor.id });
     sendJson(res, 200, { action });
     return;
   }
@@ -329,6 +366,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       return;
     }
     const results = parsed.map((p) => ingestAlert(p));
+    broadcastEvent({ event: 'alerts-ingested', count: results.length });
     sendJson(res, 201, { ingested: results.length, alerts: results.map((r) => ({ id: r.alert.id, created: r.created })) });
     return;
   }

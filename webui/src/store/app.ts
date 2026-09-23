@@ -7,7 +7,7 @@ import { api, onUnauthorized } from '../api/client';
 import type { ApiAction, ApiUser } from '../api/types';
 import type { UserRole } from '../lib/governance';
 
-export type View = 'login' | 'board' | 'console' | 'assets' | 'usage' | 'audit' | 'settings' | 'inbox' | 'incidents' | 'knowledge';
+export type View = 'login' | 'board' | 'console' | 'assets' | 'usage' | 'audit' | 'settings' | 'inbox' | 'incidents' | 'knowledge' | 'mine';
 export type Theme = 'light' | 'dark';
 
 interface AppState {
@@ -29,6 +29,23 @@ interface AppState {
 
 const THEME_KEY = 'skyport-theme';
 
+/** 视图 ↔ URL 单一映射表（navigate 推入 / boot 深链读取，两处不再各写一遍） */
+const VIEW_PATHS: Readonly<Record<View, string>> = {
+  login: '/login', board: '/', console: '/console', assets: '/assets', usage: '/usage',
+  audit: '/audit', settings: '/settings', inbox: '/inbox', incidents: '/incidents',
+  knowledge: '/knowledge', mine: '/mine',
+};
+
+function pathOfView(view: View): string {
+  return VIEW_PATHS[view];
+}
+
+/** URL → 视图（boot 深链 + popstate 共用；未知路径落看板） */
+export function viewFromPath(pathname: string): View {
+  const found = (Object.keys(VIEW_PATHS) as View[]).find((v) => VIEW_PATHS[v] === pathname);
+  return found ?? 'board';
+}
+
 function applyTheme(theme: Theme): void {
   document.documentElement.classList.toggle('theme-dark', theme === 'dark');
   document.documentElement.classList.toggle('theme-light', theme !== 'dark');
@@ -47,7 +64,9 @@ export const useApp = create<AppState>((set, get) => ({
     applyTheme(get().theme);
     try {
       const { user } = await api.me();
-      set({ user: user ?? undefined, view: user === null ? 'login' : 'board', booted: true });
+      // 初始路由：直接访问 /assets 等深链时跟随 URL，而非一律落看板
+      const fromUrl = viewFromPath(location.pathname);
+      set({ user: user ?? undefined, view: user === null ? 'login' : fromUrl, booted: true });
       if (user !== null) await get().refreshBoard();
     } catch {
       set({ view: 'login', booted: true });
@@ -56,8 +75,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   navigate: (view) => {
     set({ view });
-    const path = view === 'login' ? '/login' : view === 'assets' ? '/assets' : view === 'usage' ? '/usage' : view === 'console' ? '/console' : view === 'audit' ? '/audit' : view === 'settings' ? '/settings' : view === 'inbox' ? '/inbox' : view === 'incidents' ? '/incidents' : view === 'knowledge' ? '/knowledge' : '/';
-    history.pushState(null, '', path);
+    history.pushState(null, '', pathOfView(view));
   },
 
   login: async (username, password) => {

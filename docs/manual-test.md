@@ -190,19 +190,61 @@ curl -X PATCH -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/ale
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/alerts/stats
 ```
 
-## 尚未实现（v0.4+ 待后续版本）
+## 已实现清单（对照 PRD 路线图，2026-09 更新）
 
-- [x] 凭证三层（刷新令牌 + 会话令牌 + 轮换）
-- [x] REST API v1（serve 进程 + 核心端点 + Bearer 认证）
+- [x] 凭证三层（刷新令牌 + 会话令牌 + 轮换，自动+手动双模式）
+- [x] REST API v1（30 路由：会话/资产/行动/审批/告警/态势包/用量/插件/基线/剧本/治理）
 - [x] MCP 适配器（7 工具/JSON-RPC stdio）
 - [x] 执行异步化（approveAsync + webhook 回推）
 - [x] 云 CLI 可操作（cloud-account → CLI 通道）
-- [x] 节点 agent Go 骨架（~/skyport-node-agent/，心跳+能力声明，待编译部署）
+- [x] 节点 agent Go v0.2.0（心跳 + CPU/内存/磁盘指标，3 台机器 systemd 常驻）
 - [x] 态势包 v1（Context Pack：资产+检查+告警+行动+拓扑自动组装，REST 端点 /api/v1/context/:asset）
 - [x] 告警总线（Alerta 模型 + Alertmanager/Zabbix/原生 适配器 + ACK SLA + REST 端点）
-- [ ] 基线三相训练
-- [ ] 资产执行互斥 + 事件认领
-- [ ] Break-glass 兜底
-- [ ] 运行时认证（ZCode fork 集成 + 四角色）
-- [ ] 编排引擎（vendor 工作流引擎 + L3 剧本）
-- [ ] Web UI
+- [x] 基线三相训练（指标采集→基线计算→异常检测）
+- [x] 资产执行互斥 + 事件认领
+- [x] Break-glass 兜底（封存 SSH 私钥 + 告警 + 4h 自动回封）
+- [x] 四角色 + 运维技能库（巡查/调查/处置/审查，4 个 SKILL.md）
+- [x] 编排引擎（剧本 6 步类型 + 审批门 + 三相毕业 + vendor 工作流桥接）
+- [x] 僵尸对账（serve 每 5 分钟自动 + reconcile CLI + doctor 可见性）
+- [x] SSE 实时事件流（审批/否决/告警摄入/僵尸对账广播，Web UI 即时刷新）
+- [x] Web UI（11 视图：动态/操作台/收件箱/我的/事件/资产/知识库/审计/用量/设置/登录）
+- [x] 注入防御（15 模式检测 + 内容隔离层）
+- [x] 治理月报 + 交接班（REST 端点 /governance/report、/handover）
+
+## 僵尸对账（v0.3.x 网关完工线收尾）
+
+前置：初始化库并创建一条行动，手动把它置为超时 executing（模拟网关崩溃残留）。
+
+```bash
+skyport doctor
+# 预期：checks 里出现 zombie-actions 项，正常时 detail 为"超时阈值 15 分钟"
+
+skyport reconcile --threshold 1
+# 预期：输出 {"scanned":N,"reconciled":N,"actionIds":[...]}，超时行动被标记 failed
+
+skyport audit verify
+# 预期：ok=true——对账事件(zombie-reconciled)已入链，actor 为 system:skyport-reconciler
+```
+
+serve 常驻时每 5 分钟自动对账一次，无需人工触发。
+
+## SSE 实时事件流（Web UI 联动）
+
+前置：`skyport serve` 运行中，两个浏览器标签登录不同角色。
+
+```bash
+curl -N http://127.0.0.1:7100/api/v1/events/stream
+# 预期：收到 {"event":"connected",...}，之后每 15s 一条 keep-alive 注释
+
+# 另一会话审批/否决一条行动后，上面的流应立即收到：
+# {"event":"action-approved"/"action-rejected","actionId":"...","by":"..."}
+# 告警摄入后收到 {"event":"alerts-ingested","count":N}
+```
+
+Web UI 侧：A 标签审批，B 标签看板无需等 8s 轮询即刷新。
+
+## Web UI 导航（11 视图全亮）
+
+- 动态/操作台/收件箱/我的/事件/资产/知识库/审计/用量/设置 全部可点，选中态高亮随 URL 同步
+- "我的"页：按当前登录用户名过滤行动时间线（GET /api/v1/actions?actor=<name>）
+- 深链直达：浏览器直接打开 /assets、/audit 等不再回落看板

@@ -14,6 +14,7 @@ import { getConfig, loadConfig } from '../config/config';
 import { isSkyportError, type SkyportError } from '../errors/errors';
 import { formatLogEntry, rootLogger, type LogSink } from '../logger/logger';
 import { runDoctor } from '../services/doctor';
+import { reconcileZombies } from '../services/reconciliation';
 import { defaultPolicyPath, loadPolicy } from '../services/risk';
 import { backupDatabase } from '../services/backup';
 import { backfillAuditChain, verifyAuditChain } from '../services/audit-chain';
@@ -135,6 +136,7 @@ function buildProgram(): Command {
           '  skyport list                 # 查看资产清单',
           '  skyport asset check web-01   # 连通性检查',
           '  skyport doctor               # 环境自检',
+          '  skyport reconcile            # 僵尸对账（超时执行中行动标记失败）',
         ]
           .join('\n')
           .concat('\n'),
@@ -234,6 +236,16 @@ function buildProgram(): Command {
       const report = await runDoctor();
       process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
       if (!report.ok) throw new Error('doctor 存在未通过项，详见上方报告');
+    });
+
+  program
+    .command('reconcile')
+    .description('僵尸对账：把超时未收敛的执行中行动标记为失败（serve 常驻时每 5 分钟自动执行）')
+    .option('--threshold <minutes>', '超时阈值（分钟）', Number)
+    .action((options: { threshold?: number }) => {
+      const threshold = Number.isFinite(options.threshold) && options.threshold !== undefined && options.threshold > 0 ? options.threshold : undefined;
+      const report = reconcileZombies(threshold);
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     });
 
   program

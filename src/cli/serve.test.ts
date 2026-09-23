@@ -38,6 +38,16 @@ async function fetchApi(path: string, token?: string, init: RequestInit = {}): P
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 }
 
+/** 轮询等待条件成立（SSE 异步到达），超时返回 false */
+async function waitFor(cond: () => boolean, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (cond()) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return cond();
+}
+
 describe('REST API v1（serve）', () => {
   it('健康检查：无需认证，返回 ok', async () => {
     serve = await startServe({ port: 0 });
@@ -217,8 +227,50 @@ describe('WebUI 会话与审批（spec/webui）', () => {
     expect(action?.status === 'success' || action?.status === 'executing' || action?.status === 'approved').toBe(true);
   });
 
-  it('否决：approver 带 note；重复审批终态 → 409 状态机拒绝', async () => {
-    createUser('web-approver2', 'password8', 'approver');
+  it('SSE 实时事件流：挂流后审批/否决行动，客户端收到广播事件', async () => {
+    createUser('sse-approver', 'password8', 'approver');
+    const pending = await createAction({
+      command: 'echo sse-broadcast',
+      actor: { type: 'human', id: 'e2e-human', name: 'e2e-human' },
+      reason: 'sse e2e',
+      riskHint: 'high',
+      rollback: 'echo 已回滚（只读 e2e）',
+    });
+    serve = await startServe({ port: 0 });
+    const cookie = cookieOf(await loginWeb('sse-approver', 'password8'));
+
+    // 挂 SSE 流：fetch 流式读取，攒进缓冲区轮询解析
+    const controller = new AbortController();
+    const stream = await fetch(`http://127.0.0.1:${serve.port}/api/v1/events/stream`, { signal: controller.signal });
+    expect(stream.headers.get('content-type')).toBe('text/event-stream');
+    const reader = stream.body!.getReader();
+    const chunks: string[] = [];
+    const pump = (async () => {
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(Buffer.from(value).toString('utf8'));
+        }
+      } catch { /* abort 时正常退出 */ }
+    })();
+
+    const reject = await fetchWeb(`/api/v1/actions/${pending.action.id}/reject`, {
+      method: 'POST', cookie, body: JSON.stringify({ note: 'sse 测试' }),
+    });
+    expect(reject.status).toBe(200);
+
+    // 轮询等待广播到达（SSE 经本机回环，秒级内可达）
+    const sawEvent = await waitFor(() => {
+      const text = chunks.join('');
+      return text.includes('action-rejected') && text.includes(pending.action.id);
+    }, 3_000);
+    controller.abort();
+    void pump;
+    expect(sawEvent).toBe(true);
+  });
+
+  it('否决：approver 带 note；重复审批终态 → 409 状态机拒绝', async () => {    createUser('web-approver2', 'password8', 'approver');
     serve = await startServe({ port: 0 });
     const cookie = cookieOf(await loginWeb('web-approver2', 'password8'));
 

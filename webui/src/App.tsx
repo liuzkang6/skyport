@@ -1,6 +1,6 @@
-/** 应用根：启动会话探测 + 视图切换（登录/看板/操作台/资产/用量/审计） */
+/** 应用根：启动会话探测 + 视图切换（11 个视图，路由表与 store 的 VIEW_PATHS 同源） */
 import { useEffect } from 'react';
-import { useApp } from './store/app';
+import { useApp, viewFromPath } from './store/app';
 import { AppShell } from './components/AppShell';
 import { LoginPage } from './pages/LoginPage';
 import { BoardPage } from './pages/BoardPage';
@@ -12,10 +12,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { InboxPage } from './pages/InboxPage';
 import { IncidentsPage } from './pages/IncidentsPage';
 import { KnowledgePage } from './pages/KnowledgePage';
-
-const ROUTES: Record<string, string> = {
-  '/': 'board', '/console': 'console', '/assets': 'assets', '/usage': 'usage', '/audit': 'audit', '/settings': 'settings', '/inbox': 'inbox', '/incidents': 'incidents', '/knowledge': 'knowledge', '/login': 'login',
-};
+import { MinePage } from './pages/MinePage';
 
 export function App() {
   const view = useApp((s) => s.view);
@@ -28,10 +25,7 @@ export function App() {
 
   // 浏览器前进/后退跟随路由
   useEffect(() => {
-    const onPop = () => {
-      const next = ROUTES[location.pathname] ?? 'board';
-      useApp.setState({ view: next as never });
-    };
+    const onPop = () => useApp.setState({ view: viewFromPath(location.pathname) });
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -50,6 +44,7 @@ export function App() {
         : view === 'inbox' ? <InboxPage />
         : view === 'incidents' ? <IncidentsPage />
         : view === 'knowledge' ? <KnowledgePage />
+        : view === 'mine' ? <MinePage />
         : <BoardPage />}
     </AppShell>
   );

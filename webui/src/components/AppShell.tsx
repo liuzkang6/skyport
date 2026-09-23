@@ -3,20 +3,19 @@
  * 禁用项保留布局仅降文本色（DESIGN.md §5 菜单规则）。
  */
 import { useEffect, type ReactNode } from 'react';
-import { useApp } from '../store/app';
+import { useApp, type View } from '../store/app';
 
-const NAV_ITEMS: readonly { key: string; label: string; enabled: boolean; hint: string }[] = [
-  { key: 'board', label: '动态', enabled: true, hint: '' },
-  { key: 'console', label: '操作台', enabled: true, hint: '' },
-  { key: 'inbox', label: '收件箱', enabled: true, hint: '' },
-  { key: 'approvals', label: '审批', enabled: true, hint: '' },
-  { key: 'mine', label: '我的', enabled: true, hint: '' },
-  { key: 'incidents', label: '事件', enabled: true, hint: '' },
-  { key: 'assets', label: '资产', enabled: true, hint: '' },
-  { key: 'knowledge', label: '知识库', enabled: true, hint: '' },
-  { key: 'audit', label: '审计', enabled: true, hint: '' },
-  { key: 'usage', label: '用量', enabled: true, hint: '' },
-  { key: 'settings', label: '设置', enabled: true, hint: '' },
+const NAV_ITEMS: readonly { key: string; label: string }[] = [
+  { key: 'board', label: '动态' },
+  { key: 'console', label: '操作台' },
+  { key: 'inbox', label: '收件箱' },
+  { key: 'mine', label: '我的' },
+  { key: 'incidents', label: '事件' },
+  { key: 'assets', label: '资产' },
+  { key: 'knowledge', label: '知识库' },
+  { key: 'audit', label: '审计' },
+  { key: 'usage', label: '用量' },
+  { key: 'settings', label: '设置' },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -51,13 +50,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           {NAV_ITEMS.map((item) => (
             <li key={item.key}>
               <span
-                aria-disabled={item.enabled ? undefined : true}
-                title={item.enabled ? undefined : item.hint}
-                onClick={item.enabled ? () => navigate(item.key as never) : undefined}
-                className={`flex h-8 items-center rounded-lg px-3 text-ui-base ${
-                  item.enabled
-                    ? `cursor-pointer font-medium ${view === item.key ? 'bg-selected text-foreground' : 'text-foreground hover:bg-hover'}`
-                    : 'cursor-default text-foreground-subtlest'
+                onClick={() => navigate(item.key as View)}
+                className={`flex h-8 cursor-pointer items-center rounded-lg px-3 text-ui-base ${
+                  view === item.key ? 'bg-selected font-medium text-foreground' : 'text-foreground hover:bg-hover'
                 }`}
               >
                 {item.label}
