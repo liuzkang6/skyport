@@ -150,6 +150,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
+  // 节点 agent 心跳（spec/node-agent：agent 用注册令牌认证，暂与 health 同级免认证，v2 加令牌验证）
+  if (method === 'POST' && path === '/api/v1/agent/heartbeat') {
+    const body = (await readBody(req)) as { agent_id?: string; hostname?: string; capabilities?: string[] };
+    sendJson(res, 200, { status: 'ok', received: true, agentId: body.agent_id ?? 'unknown', timestamp: new Date().toISOString() });
+    return;
+  }
+
   // WebUI 静态托管（无需认证：页面外壳公开，数据全部经认证 API；非 /api 路径 SPA fallback）
   if (!path.startsWith('/api/') && (method === 'GET' || method === 'HEAD') && serveStatic(res, path)) {
     return;

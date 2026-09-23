@@ -23,7 +23,7 @@ export interface UsageSummary {
 
 export function recordUsage(event: UsageEvent): void {
   if (event.promptTokens < 0 || event.completionTokens < 0 || event.costUsd < 0) {
-    throw createError(ERROR_CODES.AGENT_INVALID, '用量数据不能为负数', { context: event });
+    throw createError(ERROR_CODES.AGENT_INVALID, '用量数据不能为负数', { context: { ...event } });
   }
   getDb()
     .prepare('INSERT INTO usage_events (agent_id, model, prompt_tokens, completion_tokens, cost_usd, action_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
