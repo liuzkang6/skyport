@@ -403,10 +403,12 @@ describe('告警闭环 REST（spec/alert-dispatcher）', () => {
 
     // 自动触发是异步的：轮询 playbook-runs 直到 disk-cleanup 出现
     const triggered = await waitFor(() => {
-      void fetchWeb('/api/v1/playbook-runs', { cookie }).then((r) => {
-        const runs = (r.body.runs ?? []) as { playbookName: string; triggerType: string; mode: string }[];
-        loopLastRuns = runs;
-      });
+      void fetchWeb('/api/v1/playbook-runs', { cookie })
+        .then((r) => {
+          const runs = (r.body.runs ?? []) as { playbookName: string; triggerType: string; mode: string }[];
+          loopLastRuns = runs;
+        })
+        .catch(() => undefined); // afterEach 关服后 in-flight 轮询被重置——吞掉防 unhandled
       return (loopLastRuns?.[0]?.playbookName ?? '') === 'disk-cleanup';
     }, 5_000);
     expect(triggered).toBe(true);
