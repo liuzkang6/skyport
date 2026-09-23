@@ -212,6 +212,8 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/alerts/stats
 - [x] 治理月报 + 交接班（REST 端点 + Web UI 治理页专属界面）
 - [x] agent 反向通道（SSE 下行 + 结果上行；Go agent v0.3.0 三台常驻；REST POST /actions 补全）
 - [x] vendored ZCode 引擎真跑（contracts 垫片 + 受治理驱动 + 桥接切换，8 条引擎测试）
+- [x] 告警闭环（调度器自动触发剧本：事件/severity 匹配 + 5 分钟冷却 + playbook_runs 留痕）
+- [x] 交接班落库（handovers 表 + GET /handover/latest + 治理页预载）
 
 ## 僵尸对账（v0.3.x 网关完工线收尾）
 
@@ -279,3 +281,27 @@ curl -X POST http://127.0.0.1:7100/api/v1/actions -H "Authorization: Bearer <na-
   由 vendor WorkflowGraphScheduler 调度（并发/错误阈值/前沿事件/死锁检测来自引擎本体）
 - 治理语义不变：training/shadow 记录不执行；detect 每步经行动系统；
   审批门停等人工；行动 pending 时引擎轮询审批结果
+
+## 告警闭环（spec/alert-dispatcher，业务闭环第一环）
+
+前置：serve 运行中（内置剧本 training 相——自动触发只记录不执行，毕业到 detect 才真动手）。
+
+```bash
+# 1. 投递磁盘告警（Web 会话角色）
+curl -X POST http://127.0.0.1:7100/api/v1/alerts -H "Cookie: <skyport_session=...>" \
+  -H 'Content-Type: application/json' \
+  -d '{"event":"DiskFull","resource":"t1","severity":"critical","origin":"manual","text":"验证"}'
+# 预期：201 新建告警；serve 日志依次出现"告警命中剧本"→"调度器系统 agent 已开通"→"vendored 引擎执行剧本"
+
+# 2. 运行留痕
+curl -H "Cookie: ..." http://127.0.0.1:7100/api/v1/playbook-runs
+# 预期：disk-cleanup / triggerType=alert / triggerAlertId 指向上面的告警 / mode=training
+
+# 3. 冷却窗口：5 分钟内再投 HighDiskUsage → runs 不增加
+
+# 4. 手动触发（approver+）
+curl -X POST http://127.0.0.1:7100/api/v1/playbooks/service-restart/trigger -H "Cookie: ..."
+# 预期：200，runs 新增 triggerType=manual 记录
+```
+
+Web UI：设置 → 运行时 → 剧本卡片"手动触发"按钮 + "剧本运行"历史表（时间/剧本/相/状态/触发来源/步数）。

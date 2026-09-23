@@ -184,6 +184,18 @@ function HandoverView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
+  // 打开即预载最近一次交接班（spec/governance：交接班历史可回溯）
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/v1/handover/latest', { credentials: 'include' });
+        if (!res.ok) return;
+        const body = (await res.json()) as { snapshot?: HandoverSnapshot };
+        if (body.snapshot !== undefined) setSnapshot(body.snapshot);
+      } catch { /* 静默 */ }
+    })();
+  }, []);
+
   const generate = useCallback(async () => {
     setBusy(true);
     try {

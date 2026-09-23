@@ -323,5 +323,34 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 13,
+    up: (db) => {
+      // 告警闭环（spec/alert-dispatcher）：剧本运行留痕——自动触发/手动触发、
+      // 毕业统计（3 训练 + 3 影子）与运行历史的数据源
+      db.exec(`
+        CREATE TABLE playbook_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          run_id TEXT NOT NULL UNIQUE,
+          playbook_name TEXT NOT NULL,
+          mode TEXT NOT NULL,
+          status TEXT NOT NULL,
+          trigger_type TEXT NOT NULL,
+          trigger_alert_id TEXT,
+          triggered_by TEXT NOT NULL,
+          steps_json TEXT NOT NULL DEFAULT '[]',
+          started_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+        CREATE INDEX idx_playbook_runs_name ON playbook_runs(playbook_name, started_at DESC);
+        CREATE TABLE handovers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          generated_at TEXT NOT NULL,
+          snapshot_json TEXT NOT NULL,
+          created_by TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 

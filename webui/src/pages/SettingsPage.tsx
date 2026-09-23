@@ -9,6 +9,7 @@ interface SecretItem { id: string; name: string; hint: string; version: number; 
 interface PluginItem { id: string; name: string; version: string; description: string | null; capabilities: string[]; enabled: boolean; source: string }
 interface PlaybookItem { name: string; description: string; mode: string; stepCount: number }
 interface AnalyzerItem { name: string; category: string; description: string; types: string[] }
+interface PlaybookRun { runId: string; playbookName: string; mode: string; status: string; triggerType: string; triggerAlertId: string | undefined; startedAt: string; stepCount: number }
 
 const TABS: readonly { key: Tab; label: string }[] = [
   { key: 'models', label: '模型配置' },
@@ -23,6 +24,8 @@ export function SettingsPage() {
   const [plugins, setPlugins] = useState<readonly PluginItem[]>([]);
   const [playbooks, setPlaybooks] = useState<readonly PlaybookItem[]>([]);
   const [analyzers, setAnalyzers] = useState<readonly AnalyzerItem[]>([]);
+  const [runs, setRuns] = useState<readonly PlaybookRun[]>([]);
+  const [triggering, setTriggering] = useState<string | undefined>(undefined);
   const [newSecretName, setNewSecretName] = useState('');
   const [newSecretValue, setNewSecretValue] = useState('');
   const [notice, setNotice] = useState<string | undefined>(undefined);
@@ -36,14 +39,26 @@ export function SettingsPage() {
 
   const loadRuntimes = useCallback(async () => {
     try {
-      const [pbRes, azRes] = await Promise.all([
+      const [pbRes, azRes, runRes] = await Promise.all([
         fetch('/api/v1/playbooks', { credentials: 'include' }),
         fetch('/api/v1/analyzers', { credentials: 'include' }),
+        fetch('/api/v1/playbook-runs', { credentials: 'include' }),
       ]);
       if (pbRes.ok) setPlaybooks(((await pbRes.json()) as { playbooks: PlaybookItem[] }).playbooks);
       if (azRes.ok) setAnalyzers(((await azRes.json()) as { analyzers: AnalyzerItem[] }).analyzers);
+      if (runRes.ok) setRuns(((await runRes.json()) as { runs: PlaybookRun[] }).runs);
     } catch { /* 静默 */ }
   }, []);
+
+  const triggerPlaybook = useCallback(async (name: string) => {
+    setTriggering(name);
+    try {
+      const res = await fetch(`/api/v1/playbooks/${encodeURIComponent(name)}/trigger`, { method: 'POST', credentials: 'include' });
+      setNotice(res.ok ? `剧本 ${name} 已触发（结果见下方运行记录）` : `触发失败: ${res.status}`);
+      if (res.ok) await loadRuntimes();
+    } catch { setNotice('网络不可达'); }
+    finally { setTriggering(undefined); }
+  }, [loadRuntimes]);
 
   useEffect(() => {
     if (tab === 'plugins') void loadVault();
@@ -159,6 +174,14 @@ export function SettingsPage() {
                   <span className="font-mono text-ui-sm">{p.name}</span>
                   <span className={`rounded-md px-1.5 py-0.5 text-ui-xs ${p.mode === 'detect' ? 'bg-success text-success-foreground' : 'bg-tag'}`}>{p.mode}</span>
                   <span className="text-ui-xs text-foreground-subtle">{p.stepCount} 步</span>
+                  <button
+                    type="button"
+                    disabled={triggering === p.name}
+                    onClick={() => void triggerPlaybook(p.name)}
+                    className="ml-auto rounded-lg border border-input-border px-2 py-0.5 text-ui-xs hover:bg-hover disabled:opacity-50"
+                  >
+                    {triggering === p.name ? '触发中…' : '手动触发'}
+                  </button>
                 </div>
                 <div className="mt-1 text-ui-caption text-foreground-subtle">{p.description}</div>
               </div>
@@ -173,6 +196,37 @@ export function SettingsPage() {
                 <span className="text-foreground-subtle">{a.description}</span>
               </div>
             ))}
+          </div>
+          <div className="rounded-xl border border-card-border bg-card p-4">
+            <h3 className="mb-2 text-ui-base font-medium">剧本运行（{runs.length}）</h3>
+            {runs.length === 0 ? (
+              <div className="text-ui-caption text-foreground-subtle">暂无运行记录——告警命中剧本 trigger 时自动触发，或用上方按钮手动触发</div>
+            ) : (
+              <table className="w-full text-ui-sm">
+                <thead>
+                  <tr className="border-b border-card-border text-ui-xs text-foreground-subtle">
+                    <th className="py-2 text-left">时间</th>
+                    <th className="py-2 text-left">剧本</th>
+                    <th className="py-2 text-left">相</th>
+                    <th className="py-2 text-left">状态</th>
+                    <th className="py-2 text-left">触发</th>
+                    <th className="py-2 text-right">步数</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {runs.map((r) => (
+                    <tr key={r.runId} className="border-b border-card-border last:border-0">
+                      <td className="py-2 text-foreground-subtle">{r.startedAt.replace('T', ' ').slice(5, 19)}</td>
+                      <td className="py-2 font-mono">{r.playbookName}</td>
+                      <td className="py-2">{r.mode}</td>
+                      <td className={`py-2 ${r.status === 'completed' || r.status === 'shadow-completed' ? 'text-positive' : r.status === 'aborted' ? 'text-destructive' : 'text-warning'}`}>{r.status}</td>
+                      <td className="py-2 text-foreground-subtle">{r.triggerType === 'alert' ? `告警 ${r.triggerAlertId ?? ''}` : '手动'}</td>
+                      <td className="py-2 text-right font-mono">{r.stepCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}

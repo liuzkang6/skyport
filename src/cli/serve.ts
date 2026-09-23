@@ -16,6 +16,7 @@ import { listAssets, getAsset } from '../services/assets';
 import { listServicesScoped } from '../services/cmdb';
 import { verifyAuditChain } from '../services/audit-chain';
 import { detectAndParse, ingestAlert, listAlerts, ackAlert, closeAlert, getAlertStats } from '../services/alert-bus';
+import { dispatchAlertToPlaybooks } from '../services/alert-dispatcher';
 import { buildContextPack, summarizeContextPack } from '../services/context-pack';
 import { approveAction, rejectAction } from '../services/actions';
 import { agentOrNull, assertActionVisible, assertAssetVisible, filterAssetsForActor } from '../services/read-scope';
@@ -487,7 +488,29 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     }
     const results = parsed.map((p) => ingestAlert(p));
     broadcastEvent({ event: 'alerts-ingested', count: results.length });
+    // 告警闭环：仅对新建告警触发剧本匹配（去重更新不重复触发，冷却窗口在调度器内判断）
+    for (const r of results) {
+      if (r.created) dispatchAlertToPlaybooks(r.alert);
+    }
     sendJson(res, 201, { ingested: results.length, alerts: results.map((r) => ({ id: r.alert.id, created: r.created })) });
+    return;
+  }
+
+  // ── 剧本运行留痕与手动触发（spec/alert-dispatcher）──
+
+  if (method === 'GET' && path === '/api/v1/playbook-runs') {
+    const { listPlaybookRuns } = await import('../services/alert-dispatcher');
+    sendJson(res, 200, { runs: listPlaybookRuns() });
+    return;
+  }
+
+  if (method === 'POST' && path.startsWith('/api/v1/playbooks/') && path.endsWith('/trigger')) {
+    requireCapability(req, 'action:approve'); // 手动触发剧本是高权限操作（可能推进到执行）
+    const name = decodeURIComponent(path.split('/')[4] ?? '');
+    const { triggerPlaybookByName } = await import('../services/alert-dispatcher');
+    const result = await triggerPlaybookByName(name, actor.actor);
+    broadcastEvent({ event: 'playbook-triggered', playbook: name, status: result.status, by: actor.actor.id });
+    sendJson(res, 200, result);
     return;
   }
 
@@ -589,7 +612,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (method === 'POST' && path === '/api/v1/handover') {
     const { createHandover } = await import('../services/governance');
     const body = (await readBody(req)) as { notes?: string };
-    sendJson(res, 200, createHandover(body.notes ?? ''));
+    sendJson(res, 200, createHandover(typeof body.notes === 'string' ? body.notes : '', `${actor.actor.type}:${actor.actor.id}`));
+    return;
+  }
+
+  if (method === 'GET' && path === '/api/v1/handover/latest') {
+    const { getLatestHandover } = await import('../services/governance');
+    sendJson(res, 200, getLatestHandover() ?? {});
     return;
   }
 

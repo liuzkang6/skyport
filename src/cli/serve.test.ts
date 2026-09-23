@@ -388,6 +388,65 @@ describe('agent 反向通道（v0.4 收尾）：命令执行走 agent 通道而�
   });
 });
 
+describe('告警闭环 REST（spec/alert-dispatcher）', () => {
+  it('投递 DiskFull 告警 → 自动触发剧本 → playbook-runs 可查', async () => {
+    createUser('disp-approver', 'password8', 'approver');
+    serve = await startServe({ port: 0 });
+    const cookie = cookieOf(await loginWeb('disp-approver', 'password8'));
+
+    // skyport 原生格式投递（alerts:write 需要 Web 会话角色）
+    const ingest = await fetchWeb('/api/v1/alerts', {
+      method: 'POST', cookie,
+      body: JSON.stringify({ event: 'DiskFull', resource: 'loop-host', severity: 'critical', origin: 'e2e', text: '磁盘闭环验证' }),
+    });
+    expect(ingest.status).toBe(201);
+
+    // 自动触发是异步的：轮询 playbook-runs 直到 disk-cleanup 出现
+    const triggered = await waitFor(() => {
+      void fetchWeb('/api/v1/playbook-runs', { cookie }).then((r) => {
+        const runs = (r.body.runs ?? []) as { playbookName: string; triggerType: string; mode: string }[];
+        loopLastRuns = runs;
+      });
+      return (loopLastRuns?.[0]?.playbookName ?? '') === 'disk-cleanup';
+    }, 5_000);
+    expect(triggered).toBe(true);
+    expect(loopLastRuns![0]!.triggerType).toBe('alert');
+    expect(loopLastRuns![0]!.mode).toBe('training'); // 内置剧本 training 相：安全
+  }, 10_000);
+
+  it('手动触发：approver POST /playbooks/:name/trigger → 200 + viewer 403', async () => {
+    createUser('trig-approver', 'password8', 'approver');
+    createUser('trig-viewer', 'password8', 'viewer');
+    serve = await startServe({ port: 0 });
+    const approver = cookieOf(await loginWeb('trig-approver', 'password8'));
+    const viewer = cookieOf(await loginWeb('trig-viewer', 'password8'));
+
+    const denied = await fetchWeb('/api/v1/playbooks/service-restart/trigger', { method: 'POST', cookie: viewer });
+    expect(denied.status).toBe(403);
+
+    const ok = await fetchWeb('/api/v1/playbooks/service-restart/trigger', { method: 'POST', cookie: approver });
+    expect(ok.status).toBe(200);
+    expect((ok.body as { mode: string }).mode).toBe('training');
+    const runs = ((await fetchWeb('/api/v1/playbook-runs', { cookie: approver })).body.runs ?? []) as { playbookName: string; triggerType: string }[];
+    expect(runs[0]!.playbookName).toBe('service-restart');
+    expect(runs[0]!.triggerType).toBe('manual');
+  });
+
+  it('交接班：POST 落库 + GET latest 读回', async () => {
+    createUser('hand-admin', 'password8', 'admin');
+    serve = await startServe({ port: 0 });
+    const cookie = cookieOf(await loginWeb('hand-admin', 'password8'));
+
+    const created = await fetchWeb('/api/v1/handover', { method: 'POST', cookie, body: JSON.stringify({ notes: 'REST 落库验证' }) });
+    expect(created.status).toBe(200);
+    const latest = await fetchWeb('/api/v1/handover/latest', { cookie });
+    expect((latest.body as { createdBy?: string }).createdBy).toContain('human:');
+    expect((latest.body as { snapshot?: { notes?: string } }).snapshot?.notes).toBe('REST 落库验证');
+  });
+});
+
+let loopLastRuns: { playbookName: string; triggerType: string; mode: string }[] | undefined;
+
 /** 模拟 Go agent：挂 SSE 通道流，对每条 exec 请求执行 handler 并 POST 回传 */
 function simulateAgent(
   token: string,

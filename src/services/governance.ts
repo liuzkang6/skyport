@@ -92,7 +92,7 @@ export interface HandoverSnapshot {
   readonly notes: string;
 }
 
-export function createHandover(notes: string): HandoverSnapshot {
+export function createHandover(notes: string, createdBy: string): HandoverSnapshot {
   const db = getDb();
   const openAlerts = (db.prepare("SELECT id, event, severity, resource FROM alerts WHERE status = 'open'").all() as
     { id: string; event: string; severity: string; resource: string }[]);
@@ -102,5 +102,19 @@ export function createHandover(notes: string): HandoverSnapshot {
   const assetHealth = (db.prepare('SELECT name, status FROM assets ORDER BY name').all() as
     { name: string; status: string }[]);
 
-  return { generatedAt: new Date().toISOString(), openAlerts, pendingActions, assetHealth, notes };
+  const snapshot: HandoverSnapshot = { generatedAt: new Date().toISOString(), openAlerts, pendingActions, assetHealth, notes };
+  // 落库留痕（spec/governance：交接班历史可回溯，不只一次性快照）
+  db.prepare('INSERT INTO handovers (generated_at, snapshot_json, created_by) VALUES (?, ?, ?)').run(
+    snapshot.generatedAt, JSON.stringify(snapshot), createdBy,
+  );
+  return snapshot;
+}
+
+/** 最近一次交接班快照（无历史返回 undefined） */
+export function getLatestHandover(): { generatedAt: string; createdBy: string; snapshot: HandoverSnapshot } | undefined {
+  const row = getDb().prepare('SELECT generated_at, snapshot_json, created_by FROM handovers ORDER BY id DESC LIMIT 1').get() as
+    | { generated_at: string; snapshot_json: string; created_by: string }
+    | undefined;
+  if (row === undefined) return undefined;
+  return { generatedAt: row.generated_at, createdBy: row.created_by, snapshot: JSON.parse(row.snapshot_json) as HandoverSnapshot };
 }
