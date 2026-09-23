@@ -214,6 +214,7 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/alerts/stats
 - [x] vendored ZCode 引擎真跑（contracts 垫片 + 受治理驱动 + 桥接切换，8 条引擎测试）
 - [x] 告警闭环（调度器自动触发剧本：事件/severity 匹配 + 5 分钟冷却 + playbook_runs 留痕）
 - [x] 交接班落库（handovers 表 + GET /handover/latest + 治理页预载）
+- [x] AI 座位：模型配置中心（v14 + key 入保险箱 + CRUD）+ LLM 客户端（usage 记账 + 注入防御）+ 巡查员（15 分钟定时巡逻 + 白名单约束）
 
 ## 僵尸对账（v0.3.x 网关完工线收尾）
 
@@ -305,3 +306,27 @@ curl -X POST http://127.0.0.1:7100/api/v1/playbooks/service-restart/trigger -H "
 ```
 
 Web UI：设置 → 运行时 → 剧本卡片"手动触发"按钮 + "剧本运行"历史表（时间/剧本/相/状态/触发来源/步数）。
+
+## AI 巡查员（spec/llm-seat：业务闭环第二环——AI 主动感知→提案→治理→执行）
+
+前置：模型已登记（设置 → 模型配置，key 加密入保险箱，永不回显）。
+
+```bash
+# 1. 登记模型（OpenAI 兼容端点；tier: cheap=巡查员 / strong=调查处置审查）
+curl -X POST http://127.0.0.1:7100/api/v1/models -H "Cookie: ..." -H 'Content-Type: application/json' \
+  -d '{"name":"glm-5-3-flash","baseUrl":"https://.../v1","modelId":"GLM-5.3-Flash","apiKey":"<key>","tier":"cheap","enabled":true}'
+
+# 2. 手动巡查（serve 亦每 15 分钟自动巡查）
+curl -X POST http://127.0.0.1:7100/api/v1/patroller/run -H "Cookie: ..." -d '{}'
+# 预期：LLM 读基线异常+开放告警简报，输出决策 JSON；
+# 只读提案（df/uptime/journalctl 等白名单头）经 createAction 建行动（低危自动执行，否则待审批）
+
+# 3. 治理不变：审批 AI 提案 → 经 agent 反向通道真执行
+curl -X POST http://127.0.0.1:7100/api/v1/actions/<id>/approve -H "Cookie: ..."
+
+# 4. 用量：LLM 调用记 usage_events（模型/token 归属巡查员 agent），用量页可查
+```
+
+Web UI：操作台顶部"AI 巡查员"卡片（最近巡查结论/异常数/提案状态 + 立即巡查按钮）。
+安全：巡查员是系统 agent（低危上限）；LLM 输出过注入守卫标记 + 决策 JSON 严格校验 +
+只读命令白名单（危险头/片段拒绝）；单次巡查提案上限 3 条。

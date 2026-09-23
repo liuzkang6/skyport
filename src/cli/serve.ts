@@ -26,10 +26,15 @@ import {
 } from '../services/users';
 import type { ActorRef } from '../services/agents';
 import { reconcileZombies } from '../services/reconciliation';
+import { runPatrollerSweep } from '../services/patroller';
 import { serveStatic } from './static';
 
 /** 僵尸对账周期：网关常驻期间每 5 分钟自愈一次 */
 const RECONCILE_INTERVAL_MS = 5 * 60_000;
+/** 巡查周期：AI 座位定时巡逻（spec/llm-seat） */
+const PATROLLER_INTERVAL_MS = 15 * 60_000;
+/** 最近一次巡查结果（内存态：serve 单进程，重启后由定时/手动巡查重建） */
+let lastPatrollerSweep: unknown;
 
 /** SSE 活动连接表：broadcastEvent 的推送目标（连接断开自动摘除） */
 const sseClients = new Set<ServerResponse>();
@@ -112,6 +117,23 @@ export function startServe(options: ServeOptions = {}): Promise<ServeResult> {
       }
     }, RECONCILE_INTERVAL_MS);
     server.on('close', () => clearInterval(zombieTimer));
+
+    // AI 巡查座位（spec/llm-seat）：定时巡逻；未配置模型时静默跳过（配置后自动生效）
+    const patrollerTimer = setInterval(() => {
+      void (async () => {
+        try {
+          lastPatrollerSweep = await runPatrollerSweep({ assetName: undefined, severity: undefined });
+          broadcastEvent({ event: 'patroller-swept', runId: (lastPatrollerSweep as { runId: string }).runId });
+        } catch (error) {
+          // CONFIG_INVALID = 未配置模型（正常冷启动态），只 debug；其他告警
+          const message = error instanceof Error ? error.message : String(error);
+          if (!message.includes('未配置任何模型')) {
+            rootLogger.warn('AI 巡查执行失败', { error: message });
+          }
+        }
+      })();
+    }, PATROLLER_INTERVAL_MS);
+    server.on('close', () => clearInterval(patrollerTimer));
   });
 }
 
@@ -573,6 +595,59 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (method === 'GET' && path === '/api/v1/plugins') {
     const { listPlugins } = await import('../services/plugins');
     sendJson(res, 200, { plugins: listPlugins() });
+    return;
+  }
+
+  // ── 模型配置中心（spec/llm-seat）：key 存保险箱，任何响应不含 key ──
+
+  if (method === 'GET' && path === '/api/v1/models') {
+    const { listModelConfigs } = await import('../services/model-config');
+    sendJson(res, 200, { models: listModelConfigs() });
+    return;
+  }
+
+  if (method === 'POST' && path === '/api/v1/models') {
+    requireCapability(req, 'action:approve'); // 模型配置是高权限（影响 AI 座位行为）
+    const body = (await readBody(req)) as Record<string, unknown>;
+    const { upsertModelConfig } = await import('../services/model-config');
+    const model = upsertModelConfig({
+      name: String(body.name ?? ''),
+      baseUrl: String(body.baseUrl ?? ''),
+      modelId: String(body.modelId ?? ''),
+      apiKey: String(body.apiKey ?? ''),
+      tier: body.tier === 'strong' ? 'strong' : 'cheap',
+      enabled: body.enabled !== false,
+    });
+    broadcastEvent({ event: 'model-configured', model: model.name, by: actor.actor.id });
+    sendJson(res, 201, model);
+    return;
+  }
+
+  if (method === 'DELETE' && path.startsWith('/api/v1/models/')) {
+    requireCapability(req, 'action:approve');
+    const name = decodeURIComponent(path.split('/')[4] ?? '');
+    const { deleteModelConfig } = await import('../services/model-config');
+    deleteModelConfig(name);
+    sendJson(res, 200, { status: 'deleted', name });
+    return;
+  }
+
+  // ── AI 巡查座位（spec/llm-seat）──
+
+  if (method === 'POST' && path === '/api/v1/patroller/run') {
+    requireCapability(req, 'alerts:write'); // 触发巡查与投递告警同级
+    const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+    const result = await runPatrollerSweep({
+      assetName: typeof body.asset === 'string' && body.asset !== '' ? body.asset : undefined,
+      severity: body.severity === 'critical' || body.severity === 'warning' ? body.severity : undefined,
+    });
+    lastPatrollerSweep = result;
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (method === 'GET' && path === '/api/v1/patroller/status') {
+    sendJson(res, 200, { intervalMinutes: PATROLLER_INTERVAL_MS / 60_000, lastSweep: lastPatrollerSweep ?? null });
     return;
   }
 

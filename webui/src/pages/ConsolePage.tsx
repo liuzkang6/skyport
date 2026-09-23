@@ -70,6 +70,9 @@ export function ConsolePage() {
     <div className="flex-1 overflow-y-auto p-6">
       <h1 className="mb-4 text-ui-lg font-semibold">Agent 操作台</h1>
 
+      {/* AI 巡查座位（spec/llm-seat）：状态 + 手动巡查 */}
+      <PatrollerCard />
+
       {/* 资产选择 */}
       <div className="mb-4 flex gap-2">
         <input
@@ -162,6 +165,71 @@ export function ConsolePage() {
           <button className="w-full rounded-lg bg-secondary px-3 py-1.5 text-ui-sm text-foreground" disabled>发送（待运行时接入）</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+interface SweepResult {
+  runId: string; completedAt: string; modelsUsed: string; promptTokens: number; completionTokens: number;
+  anomalies: string[]; proposals: { command: string; target: string; reason: string; actionId: string; status: string }[]; note: string;
+}
+
+/** AI 巡查卡片：最近巡查状态 + 手动触发（低危只读提案自动执行，中高危走审批） */
+function PatrollerCard() {
+  const [last, setLast] = useState<SweepResult | null>(null);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/v1/patroller/status', { credentials: 'include' });
+        if (res.ok) {
+          const body = (await res.json()) as { lastSweep: SweepResult | null };
+          setLast(body.lastSweep);
+        }
+      } catch { /* 静默 */ }
+    })();
+  }, []);
+
+  const run = useCallback(async () => {
+    setRunning(true);
+    setError(undefined);
+    try {
+      const res = await fetch('/api/v1/patroller/run', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (res.ok) setLast((await res.json()) as SweepResult);
+      else setError(`巡查失败: ${res.status}`);
+    } catch { setError('网络不可达'); }
+    finally { setRunning(false); }
+  }, []);
+
+  return (
+    <div className="mb-4 rounded-xl border border-card-border bg-card p-4">
+      <div className="flex items-center gap-3">
+        <span className="text-ui-base font-medium">AI 巡查员</span>
+        <span className="rounded-md bg-tag px-1.5 py-0.5 text-ui-xs">每 15 分钟自动巡逻</span>
+        {last !== null && <span className="text-ui-caption text-foreground-subtle">最近：{last.completedAt.replace('T', ' ').slice(5, 19)} · {last.modelsUsed}</span>}
+        <button
+          type="button"
+          disabled={running}
+          onClick={() => void run()}
+          className="ml-auto rounded-lg bg-primary px-3 py-1 text-ui-sm text-primary-foreground hover:opacity-90 disabled:opacity-50"
+        >{running ? '巡查中…' : '立即巡查'}</button>
+      </div>
+      {error !== undefined && <div className="mt-2 text-ui-sm text-destructive">{error}</div>}
+      {last !== null && (
+        <div className="mt-2 text-ui-sm">
+          <span className="text-foreground-subtle">{last.note}</span>
+          {last.anomalies.length > 0 && <span className="ml-2 rounded-md bg-warning/20 px-1.5 py-0.5 text-ui-xs text-warning">异常 {last.anomalies.length}</span>}
+          {last.proposals.map((p) => (
+            <div key={p.actionId} className="mt-1 rounded-lg bg-surface p-2">
+              <span className={`mr-2 rounded-md px-1.5 py-0.5 text-ui-xs ${p.status === 'success' ? 'bg-positive text-positive-foreground' : p.status === 'pending' ? 'bg-warning text-warning-foreground' : 'bg-destructive text-destructive-foreground'}`}>{p.status}</span>
+              <span className="font-mono text-ui-xs">{p.target}$ {p.command}</span>
+              <span className="ml-2 text-ui-caption text-foreground-subtle">{p.reason}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -352,5 +352,26 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 14,
+    up: (db) => {
+      // 模型配置中心（spec/llm-seat）：API key 不落本表——存保险箱（AES-GCM），
+      // 表里只存 vault 引用名；tier 供四角色按档选模型（cheap/strong）
+      db.exec(`
+        CREATE TABLE model_configs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          base_url TEXT NOT NULL,
+          model_id TEXT NOT NULL,
+          api_key_secret TEXT NOT NULL,
+          tier TEXT NOT NULL DEFAULT 'cheap',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          last_used_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 

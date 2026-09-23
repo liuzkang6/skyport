@@ -449,6 +449,46 @@ describe('告警闭环 REST（spec/alert-dispatcher）', () => {
 
 let loopLastRuns: { playbookName: string; triggerType: string; mode: string }[] | undefined;
 
+describe('模型配置与 AI 巡查 REST（spec/llm-seat）', () => {
+  it('模型 CRUD：approver 登记 → 列表无 key → 删除；viewer 只读', async () => {
+    createUser('model-approver', 'password8', 'approver');
+    createUser('model-viewer', 'password8', 'viewer');
+    serve = await startServe({ port: 0 });
+    const approver = cookieOf(await loginWeb('model-approver', 'password8'));
+    const viewer = cookieOf(await loginWeb('model-viewer', 'password8'));
+
+    // viewer 登记被拒
+    const denied = await fetchWeb('/api/v1/models', { method: 'POST', cookie: viewer, body: JSON.stringify({ name: 'x' }) });
+    expect(denied.status).toBe(403);
+
+    const created = await fetchWeb('/api/v1/models', {
+      method: 'POST', cookie: approver,
+      body: JSON.stringify({ name: 'glm-flash', baseUrl: 'https://models.example.com/glm/v1', modelId: 'GLM-5.3-Flash', apiKey: 'sk-never-leak', tier: 'cheap', enabled: true }),
+    });
+    expect(created.status).toBe(201);
+    // 任何响应不含 key
+    expect(JSON.stringify(created.body)).not.toContain('sk-never-leak');
+
+    const list = await fetchWeb('/api/v1/models', { cookie: viewer });
+    expect((list.body.models as { name: string }[]).map((m) => m.name)).toContain('glm-flash');
+    expect(JSON.stringify(list.body)).not.toContain('sk-never-leak');
+
+    const removed = await fetchWeb('/api/v1/models/glm-flash', { method: 'DELETE', cookie: approver });
+    expect(removed.status).toBe(200);
+    expect(((await fetchWeb('/api/v1/models', { cookie: viewer })).body.models as unknown[])).toHaveLength(0);
+  });
+
+  it('巡查状态：GET patroller/status 返回周期与最近结果（初始为空）', async () => {
+    createUser('pat-admin', 'password8', 'admin');
+    serve = await startServe({ port: 0 });
+    const cookie = cookieOf(await loginWeb('pat-admin', 'password8'));
+    const status = await fetchWeb('/api/v1/patroller/status', { cookie });
+    expect(status.status).toBe(200);
+    expect((status.body as { intervalMinutes: number }).intervalMinutes).toBe(15);
+    expect((status.body as { lastSweep: unknown }).lastSweep).toBeNull();
+  });
+});
+
 /** 模拟 Go agent：挂 SSE 通道流，对每条 exec 请求执行 handler 并 POST 回传 */
 function simulateAgent(
   token: string,
