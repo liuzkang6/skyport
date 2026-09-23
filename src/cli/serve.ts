@@ -63,6 +63,17 @@ interface RequestAuth {
   readonly cookieToken: string | undefined;
 }
 
+/** agent 结果回传载荷（/api/v1/agent/result） */
+interface AgentResultBody {
+  requestId: string;
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  durationMs: number;
+  timedOut: boolean;
+}
+
 /** 启动 REST API 服务器（返回 Server 实例供测试用） */
 export function startServe(options: ServeOptions = {}): Promise<ServeResult> {
   const port = options.port ?? 7100;
@@ -217,6 +228,90 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
+  // ── agent 反向通道（v0.4 收尾）：SSE 下行 + 结果上行 ──
+
+  // 下行：agent 挂住此流，网关把已审批命令从这条连接推下去（认证：agent 令牌）
+  if (method === 'GET' && path === '/api/v1/agent/channel') {
+    const auth = resolveAuth(req);
+    if (auth === undefined) {
+      sendJson(res, 401, { error: '缺少 Bearer 令牌', type: ERROR_CODES.AUTH_REQUIRED });
+      return;
+    }
+    if (auth.actor.type !== 'agent') {
+      sendJson(res, 403, { error: 'agent 通道仅接受 agent 令牌', type: ERROR_CODES.PERMISSION_DENIED });
+      return;
+    }
+    const hostname = url.searchParams.get('hostname') ?? '';
+    let assetName = '';
+    try {
+      const { getAsset } = await import('../services/assets');
+      const asset = hostname !== '' ? getAsset(hostname) : undefined;
+      assetName = asset?.name ?? '';
+    } catch { /* 未登记主机：assetName 保持空串，下面统一拒绝 */ }
+    if (assetName === '') {
+      sendJson(res, 400, { error: `hostname 未登记为资产（先 asset add）`, type: ERROR_CODES.ASSET_NOT_FOUND });
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write(`data: ${JSON.stringify({ event: 'channel-open', asset: assetName, agentId: auth.actor.id, timestamp: new Date().toISOString() })}\n\n`);
+    const { registerChannel, unregisterChannel } = await import('../services/agent-channel');
+    const sender = (payload: Readonly<Record<string, unknown>>) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+    registerChannel(assetName, sender);
+    broadcastEvent({ event: 'agent-channel-open', asset: assetName, agentId: auth.actor.id });
+    const keepAlive = setInterval(() => {
+      res.write(`: keep-alive\n\n`);
+    }, 15_000);
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      unregisterChannel(assetName, sender);
+    });
+    return;
+  }
+
+  // 上行：agent 回传执行结果（resolve 对应 pending 请求）
+  if (method === 'POST' && path === '/api/v1/agent/result') {
+    const auth = resolveAuth(req);
+    if (auth === undefined) {
+      sendJson(res, 401, { error: '缺少 Bearer 令牌', type: ERROR_CODES.AUTH_REQUIRED });
+      return;
+    }
+    if (auth.actor.type !== 'agent') {
+      sendJson(res, 403, { error: '结果回传仅接受 agent 令牌', type: ERROR_CODES.PERMISSION_DENIED });
+      return;
+    }
+    const body = (await readBody(req)) as Partial<AgentResultBody>;
+    if (typeof body.requestId !== 'string' || body.requestId === '') {
+      sendJson(res, 400, { error: 'requestId 必填', type: 'SKYPORT_AGENT_INVALID' });
+      return;
+    }
+    // 输出防御：与 executor 同口径截断（100KB），agent 回传不可无限信任
+    const cap = 100 * 1024;
+    const clip = (s: unknown): string => (typeof s === 'string' ? (s.length > cap ? s.slice(0, cap) : s) : '');
+    const result = {
+      requestId: body.requestId,
+      ok: body.ok === true,
+      stdout: clip(body.stdout),
+      stderr: clip(body.stderr),
+      exitCode: typeof body.exitCode === 'number' ? body.exitCode : undefined,
+      durationMs: typeof body.durationMs === 'number' ? body.durationMs : 0,
+      timedOut: body.timedOut === true,
+    };
+    const { resolveAgentResult } = await import('../services/agent-channel');
+    const accepted = resolveAgentResult(result);
+    if (!accepted) {
+      sendJson(res, 409, { error: '未知或已完结的 requestId', type: ERROR_CODES.AGENT_NOT_FOUND });
+      return;
+    }
+    sendJson(res, 200, { status: 'ok', requestId: result.requestId });
+    return;
+  }
+
   // SSE 事件流（spec/webui：实时推送告警/状态变更；连接注册进表，broadcastEvent 全体推送）
   if (method === 'GET' && path === '/api/v1/events/stream') {
     res.writeHead(200, {
@@ -310,6 +405,31 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const limit = Number(url.searchParams.get('limit') ?? '50');
     const page = listActions({ status: status as never, actor: actorFilter, limit, scopePatterns: agentOrNull(actor.actor)?.assetPatterns });
     sendJson(res, 200, page);
+    return;
+  }
+
+  // 创建行动（REST 权威接口补全）：Bearer actor 或 Web 会话均可；风险引擎照常裁决
+  if (method === 'POST' && path === '/api/v1/actions') {
+    const body = (await readBody(req)) as {
+      command?: unknown; target?: unknown; reason?: unknown;
+      riskHint?: unknown; rollback?: unknown; dryRun?: unknown;
+    };
+    if (typeof body.command !== 'string' || body.command.trim() === '') {
+      sendJson(res, 400, { error: 'command 必填', type: ERROR_CODES.ACTION_INVALID });
+      return;
+    }
+    const { createAction } = await import('../services/actions');
+    const result = await createAction({
+      command: body.command,
+      target: typeof body.target === 'string' && body.target !== '' ? body.target : undefined,
+      reason: typeof body.reason === 'string' && body.reason !== '' ? body.reason : undefined,
+      riskHint: body.riskHint === 'low' || body.riskHint === 'medium' || body.riskHint === 'high' ? body.riskHint : undefined,
+      rollback: typeof body.rollback === 'string' && body.rollback !== '' ? body.rollback : undefined,
+      dryRun: body.dryRun === true,
+      actor: actor.actor,
+    });
+    broadcastEvent({ event: 'action-created', actionId: result.action.id, by: actor.actor.id });
+    sendJson(res, 201, result);
     return;
   }
 

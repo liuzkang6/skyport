@@ -12,35 +12,35 @@ import type {
 } from "@zcode/contracts";
 
 export interface WorkflowGraphSchedulerActivityInput {
-  abortSignal?: AbortSignal;
+  abortSignal?: AbortSignal | undefined;
   activityId: string;
   cwd: string;
   node: WorkflowGraphNode;
-  onChildSessionStarted?: (
-    event: WorkflowGraphSchedulerChildSessionStartedEvent,
-  ) => void | Promise<void>;
-  onEvent?: (event: SessionEvent) => void | Promise<void>;
-  parentSessionId?: string;
+  onChildSessionStarted?:
+    | ((event: WorkflowGraphSchedulerChildSessionStartedEvent) => void | Promise<void>)
+    | undefined;
+  onEvent?: ((event: SessionEvent) => void | Promise<void>) | undefined;
+  parentSessionId?: string | undefined;
   phase: string;
   prompt: string;
   runId: string;
   task: string;
-  traceContext?: TraceContext;
+  traceContext?: TraceContext | undefined;
 }
 
 export interface WorkflowGraphSchedulerActivityResult {
-  model?: string;
+  model?: string | undefined;
   response: string;
   sessionId: string;
-  traceId?: string;
-  turnId?: string;
+  traceId?: string | undefined;
+  turnId?: string | undefined;
 }
 
 export interface WorkflowGraphSchedulerChildSessionStartedEvent {
-  model?: string;
+  model?: string | undefined;
   sessionId: string;
-  traceId?: string;
-  turnId?: string;
+  traceId?: string | undefined;
+  turnId?: string | undefined;
 }
 
 export interface WorkflowGraphSchedulerRunner {
@@ -48,30 +48,30 @@ export interface WorkflowGraphSchedulerRunner {
 }
 
 export interface WorkflowGraphSchedulerPlannerInput {
-  abortSignal?: AbortSignal;
+  abortSignal?: AbortSignal | undefined;
   activityId: string;
   collection: WorkflowGraphCollection;
   cwd: string;
   graph: WorkflowGraph;
-  onChildSessionStarted?: (
-    event: WorkflowGraphSchedulerChildSessionStartedEvent,
-  ) => void | Promise<void>;
-  onEvent?: (event: SessionEvent) => void | Promise<void>;
-  parentSessionId?: string;
+  onChildSessionStarted?:
+    | ((event: WorkflowGraphSchedulerChildSessionStartedEvent) => void | Promise<void>)
+    | undefined;
+  onEvent?: ((event: SessionEvent) => void | Promise<void>) | undefined;
+  parentSessionId?: string | undefined;
   phase: string;
   prompt: string;
   runId: string;
   snapshot: WorkflowRunSnapshot;
   task: string;
-  traceContext?: TraceContext;
+  traceContext?: TraceContext | undefined;
 }
 
 export interface WorkflowGraphSchedulerPlannerRunResult extends WorkflowGraphPlannerResult {
-  model?: string;
+  model?: string | undefined;
   response: string;
   sessionId: string;
-  traceId?: string;
-  turnId?: string;
+  traceId?: string | undefined;
+  turnId?: string | undefined;
 }
 
 export interface WorkflowGraphSchedulerPlannerRunner {
@@ -79,11 +79,11 @@ export interface WorkflowGraphSchedulerPlannerRunner {
 }
 
 export interface WorkflowGraphSchedulerDeps {
-  appendEvent(event: WorkflowEvent, options?: { signal?: AbortSignal }): Promise<void>;
+  appendEvent(event: WorkflowEvent, options?: { signal?: AbortSignal | undefined }): Promise<void>;
   appendGraphRecord(
     runId: string,
     record: WorkflowGraphRecord,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal | undefined },
   ): Promise<void>;
   createActivityId: () => string;
   now: () => Date;
@@ -94,13 +94,13 @@ export interface WorkflowGraphSchedulerDeps {
     runId: string,
     relativePath: string,
     content: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<{ path: string; relativePath: string }>;
-  writeSnapshot(snapshot: WorkflowRunSnapshot, options?: { signal?: AbortSignal }): Promise<void>;
+    options?: { signal?: AbortSignal | undefined },
+  ): Promise<{ path: string; relativePath: string }>
+  writeSnapshot(snapshot: WorkflowRunSnapshot, options?: { signal?: AbortSignal | undefined }): Promise<void>;
 }
 
 export interface WorkflowGraphSchedulerRunOptions {
-  abortSignal?: AbortSignal;
+  abortSignal?: AbortSignal | undefined;
   artifactDirectory?: string;
   buildPrompt?: (input: {
     node: WorkflowGraphNode;
@@ -109,11 +109,11 @@ export interface WorkflowGraphSchedulerRunOptions {
   }) => string;
   cwd: string;
   executableNodeIds?: Iterable<string>;
-  onEvent?: (event: SessionEvent) => void | Promise<void>;
-  parentSessionId?: string;
+  onEvent?: ((event: SessionEvent) => void | Promise<void>) | undefined;
+  parentSessionId?: string | undefined;
   phase: string;
   snapshot: WorkflowRunSnapshot;
-  traceContext?: TraceContext;
+  traceContext?: TraceContext | undefined;
 }
 
 export interface WorkflowGraphSchedulerRunResult {

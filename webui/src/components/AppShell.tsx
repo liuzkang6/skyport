@@ -14,6 +14,7 @@ const NAV_ITEMS: readonly { key: string; label: string }[] = [
   { key: 'assets', label: '资产' },
   { key: 'knowledge', label: '知识库' },
   { key: 'audit', label: '审计' },
+  { key: 'governance', label: '治理' },
   { key: 'usage', label: '用量' },
   { key: 'settings', label: '设置' },
 ];

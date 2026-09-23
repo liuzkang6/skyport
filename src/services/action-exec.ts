@@ -11,6 +11,7 @@ import { execute, type ExecResult } from '../executor/executor';
 import { rootLogger } from '../logger/logger';
 import { appendChainedEvent, appendChainedExecution, type ActionEventType, type ChainActorType } from './audit-chain';
 import { getAsset, parseAddr } from './assets';
+import { dispatchToAsset, isAssetChannelConnected, type AgentExecResult } from './agent-channel';
 import { tokenizeCommand } from './risk';
 
 export interface ActionCore {
@@ -102,6 +103,15 @@ export function buildExecSpec(action: ActionCore): ExecSpec {
   };
 }
 
+/** 目标资产有在线 agent 通道时经通道执行；无通道返回 undefined（走常规本地/SSH 路径） */
+async function tryDispatchViaChannel(action: ActionCore): Promise<AgentExecResult | undefined> {
+  if (action.targetKind !== 'ssh' || action.targetAssetId === undefined) return undefined;
+  const asset = getAsset(action.targetAssetId);
+  if (asset === undefined || !isAssetChannelConnected(asset.name)) return undefined;
+  rootLogger.info('经 agent 反向通道执行', { actionId: action.id, asset: asset.name, command: action.command });
+  return dispatchToAsset(asset.name, action.command);
+}
+
 /** 执行一条已放行的行动：原子占位 executing → 执行 → 落结果与终态 */
 export async function executeAction(
   action: ActionCore,
@@ -129,16 +139,29 @@ export async function executeAction(
   let errorMessage: string | undefined;
   let ok = false;
   try {
-    const spec = buildExecSpec(action);
-    const result: ExecResult = await execute(spec.command, spec.args);
-    ok = true;
-    stdout = result.stdout;
-    stderr = result.stderr;
-    exitCode = result.exitCode;
-    durationMs = result.durationMs;
-    attempts = result.attempts;
-    stdoutTruncated = result.stdoutTruncated;
-    stderrTruncated = result.stderrTruncated;
+    // agent 反向通道优先（v0.4 收尾）：目标资产有在线 agent 通道时经通道下发，
+    // 不再依赖网关直连 SSH；通道在线但执行失败就是失败——不回退（防同一命令双路径重复执行）
+    const channelResult = await tryDispatchViaChannel(action);
+    if (channelResult !== undefined) {
+      ok = channelResult.ok;
+      stdout = channelResult.stdout;
+      stderr = channelResult.stderr;
+      exitCode = channelResult.exitCode;
+      timedOut = channelResult.timedOut;
+      durationMs = channelResult.durationMs;
+      if (!ok && !timedOut && channelResult.stderr !== '') errorMessage = channelResult.stderr;
+    } else {
+      const spec = buildExecSpec(action);
+      const result: ExecResult = await execute(spec.command, spec.args);
+      ok = true;
+      stdout = result.stdout;
+      stderr = result.stderr;
+      exitCode = result.exitCode;
+      durationMs = result.durationMs;
+      attempts = result.attempts;
+      stdoutTruncated = result.stdoutTruncated;
+      stderrTruncated = result.stderrTruncated;
+    }
   } catch (error) {
     if (isSkyportError(error)) {
       errorMessage = error.message;

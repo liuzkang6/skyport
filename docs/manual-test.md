@@ -209,7 +209,9 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/alerts/stats
 - [x] SSE 实时事件流（审批/否决/告警摄入/僵尸对账广播，Web UI 即时刷新）
 - [x] Web UI（11 视图：动态/操作台/收件箱/我的/事件/资产/知识库/审计/用量/设置/登录）
 - [x] 注入防御（15 模式检测 + 内容隔离层）
-- [x] 治理月报 + 交接班（REST 端点 /governance/report、/handover）
+- [x] 治理月报 + 交接班（REST 端点 + Web UI 治理页专属界面）
+- [x] agent 反向通道（SSE 下行 + 结果上行；Go agent v0.3.0 三台常驻；REST POST /actions 补全）
+- [x] vendored ZCode 引擎真跑（contracts 垫片 + 受治理驱动 + 桥接切换，8 条引擎测试）
 
 ## 僵尸对账（v0.3.x 网关完工线收尾）
 
@@ -248,3 +250,32 @@ Web UI 侧：A 标签审批，B 标签看板无需等 8s 轮询即刷新。
 - 动态/操作台/收件箱/我的/事件/资产/知识库/审计/用量/设置 全部可点，选中态高亮随 URL 同步
 - "我的"页：按当前登录用户名过滤行动时间线（GET /api/v1/actions?actor=<name>）
 - 深链直达：浏览器直接打开 /assets、/audit 等不再回落看板
+
+## agent 反向通道（v0.4 收尾：命令执行走 agent 通道而非网关 SSH）
+
+前置：三台节点 agent v0.3.0 常驻（心跳 + 反向通道双循环），令牌经 systemd `SKYPORT_AGENT_TOKEN` 注入。
+
+```bash
+# 1. 通道在线确认（serve 日志）
+grep 'agent 通道已连接' ~/.skyport/serve.log | tail -3
+# 预期：t1/t2/t3 各一条（agent 断线 3s 自动重连）
+
+# 2. REST 创建行动（POST /api/v1/actions 已补全）+ 审批 → 命令经通道下发
+curl -X POST http://127.0.0.1:7100/api/v1/actions -H "Authorization: Bearer <na-t1 的 skp_ key>" \
+  -H 'Content-Type: application/json' -d '{"command":"hostname","target":"t1","reason":"通道验证"}'
+# 审批后 serve 日志出现"经 agent 反向通道执行"，t1 上 journalctl 出现"命令已执行并回传"
+
+# 3. 门禁：无令牌挂通道 → 401；Web 会话 → 403；未登记 hostname → 400
+```
+
+## 治理页（v0.7 补全：月报 + 交接班专属 UI）
+
+- 侧栏"治理"：治理月报标签（周期 24h/7d/30d 切换，行动×状态/风险/操作者分布 + 高频命令 Top10 + 审计链完整性横幅）
+- 交接班标签：手写备注 + 一键生成快照（开放告警/待审批/资产健康）
+
+## vendored ZCode 引擎真跑（v0.6 收尾）
+
+- `executeViaBridge` 不再委托原生 playbook：剧本编译为 WorkflowRunSnapshot，
+  由 vendor WorkflowGraphScheduler 调度（并发/错误阈值/前沿事件/死锁检测来自引擎本体）
+- 治理语义不变：training/shadow 记录不执行；detect 每步经行动系统；
+  审批门停等人工；行动 pending 时引擎轮询审批结果

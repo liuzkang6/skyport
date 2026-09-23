@@ -270,7 +270,8 @@ describe('WebUI 会话与审批（spec/webui）', () => {
     expect(sawEvent).toBe(true);
   });
 
-  it('否决：approver 带 note；重复审批终态 → 409 状态机拒绝', async () => {    createUser('web-approver2', 'password8', 'approver');
+  it('否决：approver 带 note；重复审批终态 → 409 状态机拒绝', async () => {
+    createUser('web-approver2', 'password8', 'approver');
     serve = await startServe({ port: 0 });
     const cookie = cookieOf(await loginWeb('web-approver2', 'password8'));
 
@@ -307,6 +308,141 @@ describe('WebUI 会话与审批（spec/webui）', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('agent 反向通道（v0.4 收尾）：命令执行走 agent 通道而非网关 SSH', () => {
+  it('完整链路：agent 挂流 → 审批命令经通道下发 → 回传结果 → 行动成功落库', async () => {
+    addAsset({ name: 'chan-host', type: 'host', addr: '10.99.0.1' }); // 无 addr：通道可用时不依赖 SSH 地址
+    const issued = createAgent({ name: 'chan-agent', assetPatterns: ['*'], riskCeiling: 'high', autoExecLow: false });
+    const session = loginWithRefreshToken(issueRefreshToken(issued.agent.id));
+    createUser('chan-approver', 'password8', 'approver');
+
+    const pending = await createAction({
+      command: 'echo chan-e2e-ok',
+      target: 'chan-host',
+      actor: { type: 'agent', id: issued.agent.id, name: 'chan-agent' },
+      reason: 'agent 通道 e2e',
+      riskHint: 'high',
+      rollback: 'echo 已回滚（只读 e2e）',
+    });
+    expect(pending.action.status).toBe('pending');
+
+    serve = await startServe({ port: 0 });
+
+    // 模拟 Go agent：挂 SSE 通道流，收到 exec 事件后回传结果
+    const agent = await simulateAgent(session.token, 'chan-host', (req) => ({
+      requestId: req.requestId,
+      ok: true,
+      stdout: `simulated:${req.command}`,
+      stderr: '',
+      exitCode: 0,
+      durationMs: 5,
+      timedOut: false,
+    }));
+    await agent.ready; // 等 channel-open 确认注册完成
+
+    // 审批 → executeAction 经通道下发 → agent 回传 → 终态（approve 同步等执行完成）
+    const cookie = cookieOf(await loginWeb('chan-approver', 'password8'));
+    const approve = await fetchWeb(`/api/v1/actions/${pending.action.id}/approve`, { method: 'POST', cookie });
+    expect(approve.status).toBe(200);
+    const finalStatus = (approve.body.action as { status: string } | undefined)?.status;
+    agent.stop();
+    expect(finalStatus).toBe('success');
+    // 下发的就是审批人读到的命令原串
+    expect(agent.sawCommand).toBe('echo chan-e2e-ok');
+  });
+
+  it('通道端点门禁：无令牌 → 401；Web 会话（human）→ 403；未登记主机名 → 400', async () => {
+    addAsset({ name: 'known-host', type: 'host', addr: '10.99.0.2' });
+    const issued = createAgent({ name: 'gate-agent', assetPatterns: ['*'], riskCeiling: 'low', autoExecLow: false });
+    const session = loginWithRefreshToken(issueRefreshToken(issued.agent.id));
+    serve = await startServe({ port: 0 });
+
+    const noToken = await fetch(`http://127.0.0.1:${serve.port}/api/v1/agent/channel?hostname=known-host`);
+    expect(noToken.status).toBe(401);
+    await noToken.body?.cancel();
+
+    createUser('chan-viewer', 'password8', 'viewer');
+    const cookie = cookieOf(await loginWeb('chan-viewer', 'password8'));
+    const human = await fetch(`http://127.0.0.1:${serve.port}/api/v1/agent/channel?hostname=known-host`, {
+      headers: { cookie },
+    });
+    expect(human.status).toBe(403);
+    await human.body?.cancel();
+
+    const unknownHost = await fetch(`http://127.0.0.1:${serve.port}/api/v1/agent/channel?hostname=ghost`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    expect(unknownHost.status).toBe(400);
+    await unknownHost.body?.cancel();
+  });
+
+  it('结果回传：未知 requestId → 409', async () => {
+    const issued = createAgent({ name: 'res-agent', assetPatterns: ['*'], riskCeiling: 'low', autoExecLow: false });
+    const session = loginWithRefreshToken(issueRefreshToken(issued.agent.id));
+    serve = await startServe({ port: 0 });
+    const res = await fetchApi('/api/v1/agent/result', session.token, {
+      method: 'POST',
+      body: JSON.stringify({ requestId: 'ghost-req', ok: true, stdout: '', stderr: '', exitCode: 0, durationMs: 1, timedOut: false }),
+    });
+    expect(res.status).toBe(409);
+  });
+});
+
+/** 模拟 Go agent：挂 SSE 通道流，对每条 exec 请求执行 handler 并 POST 回传 */
+function simulateAgent(
+  token: string,
+  hostname: string,
+  handle: (req: { requestId: string; command: string }) => Record<string, unknown>,
+): { ready: Promise<boolean>; stop: () => void; sawCommand: string; lastStatus: string } {
+  const controller = new AbortController();
+  const state = { sawCommand: '', lastStatus: '' };
+  let resolveReady: (v: boolean) => void = () => {};
+  const ready = new Promise<boolean>((r) => { resolveReady = r; });
+  void (async () => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${serve!.port}/api/v1/agent/channel?hostname=${hostname}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+      if (res.status !== 200) {
+        const text = await res.text();
+        resolveReady(false);
+        throw new Error(`channel 挂流失败 ${res.status}: ${text.slice(0, 120)}`);
+      }
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop() ?? '';
+        for (const frame of frames) {
+          const line = frame.split('\n').find((l) => l.startsWith('data: '));
+          if (line === undefined) continue;
+          const payload = JSON.parse(line.slice(6)) as { event?: string; requestId?: string; command?: string };
+          if (payload.event === 'channel-open') resolveReady(true);
+          if (payload.event === 'exec' && payload.requestId !== undefined) {
+            state.sawCommand = payload.command ?? '';
+            void fetch(`http://127.0.0.1:${serve!.port}/api/v1/agent/result`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify(handle({ requestId: payload.requestId, command: payload.command ?? '' })),
+            });
+          }
+        }
+      }
+    } catch { /* abort 退出 */ }
+  })();
+  return {
+    ready,
+    stop: () => controller.abort(),
+    get sawCommand() { return state.sawCommand; },
+    get lastStatus() { return state.lastStatus; },
+    set lastStatus(v: string) { state.lastStatus = v; },
+  };
+}
 
 // ── 读侧范围（红队 V5）：agent 令牌只见范围内的资产与行动 ──
 

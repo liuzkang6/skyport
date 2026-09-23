@@ -13,6 +13,7 @@ import { InboxPage } from './pages/InboxPage';
 import { IncidentsPage } from './pages/IncidentsPage';
 import { KnowledgePage } from './pages/KnowledgePage';
 import { MinePage } from './pages/MinePage';
+import { GovernancePage } from './pages/GovernancePage';
 
 export function App() {
   const view = useApp((s) => s.view);
@@ -45,6 +46,7 @@ export function App() {
         : view === 'incidents' ? <IncidentsPage />
         : view === 'knowledge' ? <KnowledgePage />
         : view === 'mine' ? <MinePage />
+        : view === 'governance' ? <GovernancePage />
         : <BoardPage />}
     </AppShell>
   );

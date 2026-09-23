@@ -19,7 +19,10 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@zcode/contracts": ["./vendor/zcode-runtime/contracts.ts"]
+    }
   },
   "include": ["src"]
 }

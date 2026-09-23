@@ -7,7 +7,7 @@ import { api, onUnauthorized } from '../api/client';
 import type { ApiAction, ApiUser } from '../api/types';
 import type { UserRole } from '../lib/governance';
 
-export type View = 'login' | 'board' | 'console' | 'assets' | 'usage' | 'audit' | 'settings' | 'inbox' | 'incidents' | 'knowledge' | 'mine';
+export type View = 'login' | 'board' | 'console' | 'assets' | 'usage' | 'audit' | 'settings' | 'inbox' | 'incidents' | 'knowledge' | 'mine' | 'governance';
 export type Theme = 'light' | 'dark';
 
 interface AppState {
@@ -33,7 +33,7 @@ const THEME_KEY = 'skyport-theme';
 const VIEW_PATHS: Readonly<Record<View, string>> = {
   login: '/login', board: '/', console: '/console', assets: '/assets', usage: '/usage',
   audit: '/audit', settings: '/settings', inbox: '/inbox', incidents: '/incidents',
-  knowledge: '/knowledge', mine: '/mine',
+  knowledge: '/knowledge', mine: '/mine', governance: '/governance',
 };
 
 function pathOfView(view: View): string {

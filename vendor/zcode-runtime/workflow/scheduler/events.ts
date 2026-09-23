@@ -11,7 +11,7 @@ export class WorkflowSchedulerEventLog {
   private readonly appendEvent: WorkflowGraphSchedulerDeps["appendEvent"];
   private readonly appendGraphRecord: WorkflowGraphSchedulerDeps["appendGraphRecord"];
   private readonly now: () => Date;
-  private readonly onWorkflowEvent?: (event: WorkflowEvent) => void | Promise<void>;
+  private readonly onWorkflowEvent?: ((event: WorkflowEvent) => void | Promise<void>) | undefined;
 
   constructor(deps: WorkflowGraphSchedulerDeps) {
     this.appendEvent = deps.appendEvent;
@@ -119,11 +119,11 @@ export class WorkflowSchedulerEventLog {
     snapshot: WorkflowRunSnapshot,
     type: WorkflowEvent["type"],
     options: {
-      message?: string;
-      nodeId?: string;
-      payload?: Record<string, unknown>;
-      phase?: string;
-      signal?: AbortSignal;
+      message?: string | undefined;
+      nodeId?: string | undefined;
+      payload?: Record<string, unknown> | undefined;
+      phase?: string | undefined;
+      signal?: AbortSignal | undefined;
     } = {},
   ): Promise<void> {
     const event: WorkflowEvent = {
