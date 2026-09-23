@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '../api/client';
+import { PageHeader } from '../components/PageHeader';
 import { formatShort } from '../lib/time';
 
 interface GovernanceReport {
@@ -84,7 +85,7 @@ export function GovernancePage() {
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="mb-4 flex items-center gap-2">
-        <h1 className="mr-4 text-ui-lg font-semibold">治理</h1>
+        <PageHeader title="治理" desc="月报与交接班" />
         <button
           type="button"
           onClick={() => setTab('report')}

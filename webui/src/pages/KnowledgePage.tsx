@@ -3,6 +3,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '../api/client';
+import { PageHeader } from '../components/PageHeader';
 
 interface PlaybookItem { name: string; description: string; mode: string; stepCount: number }
 interface AnalyzerItem { name: string; category: string; description: string; types: string[] }
@@ -37,7 +38,7 @@ export function KnowledgePage() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <h1 className="mb-4 text-ui-lg font-semibold">知识库</h1>
+      <PageHeader title="知识库" desc="运维技能、剧本与分析器注册表" />
 
       <div className="space-y-6">
         <section>

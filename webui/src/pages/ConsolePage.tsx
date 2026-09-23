@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../api/client';
+import { PageHeader } from '../components/PageHeader';
 import { formatShort } from '../lib/time';
 
 interface ContextPack {
@@ -89,7 +90,7 @@ export function ConsolePage() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <h1 className="mb-4 text-ui-lg font-semibold">Agent 操作台</h1>
+      <PageHeader title="操作台" desc="态势包 · AI 巡查 · 就地审批——值班人一页搞定" />
 
       {/* AI 巡查座位（spec/llm-seat）：状态 + 手动巡查 */}
       <PatrollerCard />

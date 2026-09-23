@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '../api/client';
+import { PageHeader } from '../components/PageHeader';
 import { useApp } from '../store/app';
 import type { ApiAction } from '../api/types';
 import { formatDateTime } from '../lib/time';
@@ -43,7 +44,7 @@ export function MinePage() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <h1 className="mb-1 text-ui-lg font-semibold">我的</h1>
+      <PageHeader title="我的" desc="我创建的行动时间线" />
       <p className="mb-4 text-ui-caption text-foreground-subtle">{user?.name} 创建的行动（{mine.length}）</p>
       {mine.length === 0 ? (
         <div className="text-ui-caption text-foreground-subtle">还没有创建过行动</div>

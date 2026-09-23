@@ -25,11 +25,11 @@ skyport 是 管理型（AI 运维行动与治理工作台） 界面。设计基�
 ### 2.1 字号 token（数值为设计系统定义）
 
 ```css
-:root { --ui-font-size: 14px; } /* 界面字号基准，改字号只改这一个变量 */
+:root { --ui-font-size: 13px; } /* 界面字号基准，改字号只改这一个变量（2026-09-23 调整 14→13：对齐 Linear 信息密度） */
 @theme {
   --text-ui-xl: calc(var(--ui-font-size) + 4px);      /* 18px: h1 */
   --text-ui-lg: calc(var(--ui-font-size) + 2px);      /* 16px: h2 */
-  --text-ui-base: var(--ui-font-size);                /* 14px: 正文/按钮/区块标题 */
+  --text-ui-base: var(--ui-font-size);                /* 13px: 正文/按钮/区块标题 */
   --text-ui-caption: calc(var(--ui-font-size) - 1px); /* 13px: 紧凑辅助文案 */
   --text-ui-sm: calc(var(--ui-font-size) - 2px);      /* 12px: 次要文案/tooltip */
   --text-ui-xs: calc(var(--ui-font-size) - 4px);      /* 10px: 徽章/快捷键/计数器 */

@@ -3,6 +3,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '../api/client';
+import { PageHeader } from '../components/PageHeader';
 
 interface Asset {
   id: string; name: string; type: string; addr: string | null;
@@ -37,7 +38,7 @@ export function AssetsPage() {
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="mb-4 flex items-center gap-4">
-        <h1 className="text-ui-lg font-semibold">资产</h1>
+        <PageHeader title="资产" desc="接入网关的节点与服务清单" />
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}

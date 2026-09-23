@@ -98,17 +98,15 @@ export function Board({ onOpenDetail }: BoardProps) {
           return (
             <div
               key={status}
-              className="flex w-64 shrink-0 flex-col rounded-xl bg-background-alt"
+              className="flex w-72 shrink-0 flex-col rounded-xl border border-card-border/60 bg-background-alt"
               onDragOver={isDropTarget ? (event) => event.preventDefault() : undefined}
               onDrop={isDropTarget ? onDropColumn(status) : undefined}
               aria-label={`${label}列，${column.length}条`}
             >
-              <header className="flex items-center justify-between px-3 pb-2 pt-3">
-                <h2 className="text-ui-base font-semibold">
-                  <span aria-hidden className="mr-1">{symbol}</span>
-                  {label}
-                </h2>
-                <span className="rounded-full bg-surface px-2 py-0.5 text-ui-xs text-foreground-subtle">{column.length}</span>
+              <header className="flex items-center gap-2 px-3 pb-2 pt-3">
+                <span aria-hidden className="text-ui-caption text-foreground-subtle">{symbol}</span>
+                <h2 className="text-ui-caption font-medium text-foreground-subtle">{label}</h2>
+                <span className="ml-auto rounded-full bg-surface px-2 py-0.5 font-mono text-ui-xs text-foreground-subtle">{column.length}</span>
               </header>
               <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
                 {column.map((action) => (
@@ -121,7 +119,7 @@ export function Board({ onOpenDetail }: BoardProps) {
                   />
                 ))}
                 {column.length === 0 ? (
-                  <p className="px-1 py-2 text-ui-xs text-foreground-subtlest">（空）</p>
+                  <p className="px-2 py-3 text-ui-xs text-foreground-subtlest">（空）</p>
                 ) : null}
               </div>
             </div>

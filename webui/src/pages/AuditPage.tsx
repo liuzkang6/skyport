@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '../api/client';
+import { PageHeader } from '../components/PageHeader';
 import type { ApiAction } from '../api/types';
 import { formatDateTime, formatClock } from '../lib/time';
 
@@ -60,7 +61,7 @@ export function AuditPage() {
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="mb-4 flex items-center gap-4">
-        <h1 className="text-ui-lg font-semibold">审计</h1>
+        <PageHeader title="审计" desc="全量行动台账与哈希链校验" />
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}

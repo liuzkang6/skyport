@@ -3,6 +3,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '../api/client';
+import { PageHeader } from '../components/PageHeader';
 import { formatShort } from '../lib/time';
 
 type Tab = 'models' | 'vault' | 'runtimes' | 'plugins';
@@ -146,7 +147,7 @@ export function SettingsPage() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <h1 className="mb-4 text-ui-lg font-semibold">设置</h1>
+      <PageHeader title="设置" desc="模型 / 保险箱 / 运行时 / 插件" />
       {notice !== undefined && <div className="mb-4 text-ui-sm text-foreground">{notice}</div>}
 
       {/* Tab 栏 */}

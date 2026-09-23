@@ -3,6 +3,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '../api/client';
+import { PageHeader } from '../components/PageHeader';
 
 interface UsageSummary {
   totalPromptTokens: number;
@@ -36,7 +37,7 @@ export function UsagePage() {
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="mb-4 flex items-center gap-4">
-        <h1 className="text-ui-lg font-semibold">Token 用量</h1>
+        <PageHeader title="用量" desc="LLM Token 消耗，按模型与座位归属" />
         <select
           value={hours}
           onChange={(e) => setHours(Number(e.target.value))}

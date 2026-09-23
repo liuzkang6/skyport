@@ -2,6 +2,8 @@
  * 事件页（PRD v0.7）：告警流 + 事件详情（关联组/态势包/AI 诊断时间线）。
  */
 import { useCallback, useEffect, useState } from 'react';
+import { api, ApiError } from '../api/client';
+import { PageHeader } from '../components/PageHeader';
 
 interface Alert {
   id: string; event: string; resource: string; severity: string; status: string;
@@ -20,12 +22,12 @@ export function IncidentsPage() {
 
   const load = useCallback(async () => {
     try {
-      const url = statusFilter === '' ? '/api/v1/alerts' : `/api/v1/alerts?status=${statusFilter}`;
-      const res = await fetch(url, { credentials: 'include' });
-      if (!res.ok) { setError(`加载失败: ${res.status}`); return; }
-      setAlerts(((await res.json()) as { alerts: Alert[] }).alerts);
+      const page = await api.listAlerts(statusFilter === '' ? undefined : statusFilter);
+      setAlerts(page.alerts as unknown as readonly Alert[]);
       setError(undefined);
-    } catch { setError('网络不可达'); }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '加载失败');
+    }
   }, [statusFilter]);
 
   useEffect(() => { void load(); }, [load]);
@@ -34,11 +36,12 @@ export function IncidentsPage() {
     setBusy(id + kind);
     setNotice(undefined);
     try {
-      const res = await fetch(`/api/v1/alerts/${encodeURIComponent(id)}/${kind}`, { method: 'PATCH', credentials: 'include' });
-      if (res.ok) { setNotice(kind === 'ack' ? '已确认（认领处理中）' : '已关闭'); await load(); }
-      else setNotice(res.status === 403 ? '当前角色无权操作（需要 approver/admin）' : `操作失败: ${res.status}`);
-    } catch { setNotice('网络不可达'); }
-    finally { setBusy(undefined); }
+      if (kind === 'ack') await api.ackAlert(id); else await api.closeAlert(id);
+      setNotice(kind === 'ack' ? '已确认（认领处理中）' : '已关闭');
+      await load();
+    } catch (e) {
+      setNotice(e instanceof ApiError ? e.message : '操作失败');
+    } finally { setBusy(undefined); }
   }, [load]);
 
   if (error !== undefined) return <div className="p-6 text-ui-base text-destructive">{error}</div>;
@@ -46,7 +49,7 @@ export function IncidentsPage() {
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="mb-4 flex items-center gap-4">
-        <h1 className="text-ui-lg font-semibold">事件</h1>
+        <PageHeader title="事件" desc="告警流：确认认领处理，处置后关闭" />
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}

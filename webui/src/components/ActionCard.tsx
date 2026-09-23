@@ -20,6 +20,12 @@ export function ActionCard({ action, draggable, onOpen, onDragStart }: ActionCar
   const actor = actorDisplay(action.actorType, action.actorName, action.actorId);
   const time = formatClock(action.createdAt);
 
+  // 左缘风险色条（pending 可拖卡强化风险预读；DESIGN.md 治理色域）
+  const riskEdge =
+    action.riskLevel === 'high' ? 'border-l-gov-risk-high'
+    : action.riskLevel === 'medium' ? 'border-l-gov-risk-medium'
+    : action.riskLevel === 'low' ? 'border-l-gov-risk-low' : '';
+
   return (
     <article
       role="button"
@@ -33,7 +39,7 @@ export function ActionCard({ action, draggable, onOpen, onDragStart }: ActionCar
           onOpen(action);
         }
       }}
-      className="w-full cursor-pointer rounded-xl border border-card-border bg-card p-3 transition-colors hover:border-border-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground-subtle"
+      className={`w-full cursor-pointer rounded-lg border border-card-border border-l-2 ${riskEdge} bg-card p-2.5 transition-colors hover:border-border-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground-subtle`}
       aria-label={`行动 ${action.id}：${action.status}，目标 ${action.targetName}`}
     >
       <header className="flex min-w-0 items-center justify-between gap-2">

@@ -56,7 +56,7 @@
 }
 
 :root {
-  --ui-font-size: 14px;
+  --ui-font-size: 13px; /* Linear 式密度（DESIGN.md §2）：正文 13px */
 }
 
 /* 亮色主题（默认，DESIGN.md §3.1） */
