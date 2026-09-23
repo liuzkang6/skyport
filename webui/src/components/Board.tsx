@@ -16,6 +16,7 @@ interface BoardProps {
 
 export function Board({ onOpenDetail }: BoardProps) {
   const actions = useApp((s) => s.actions);
+  const boardHasMore = useApp((s) => s.boardHasMore);
   const refreshBoard = useApp((s) => s.refreshBoard);
   const user = useApp((s) => s.user);
   const [dragId, setDragId] = useState<string | undefined>(undefined);
@@ -73,6 +74,10 @@ export function Board({ onOpenDetail }: BoardProps) {
 
   return (
     <section aria-label="行动看板" className="flex min-h-0 flex-1 flex-col">
+      {/* QA #3：看板 limit=200，超出部分静默丢弃——显式告知 */}
+      {boardHasMore ? (
+        <p className="mb-1 text-ui-xs text-foreground-subtlest">数据较多，仅显示最近 200 条（完整台账见审计页）</p>
+      ) : null}
       {notice !== undefined ? (
         <div
           role="status"
@@ -87,7 +92,9 @@ export function Board({ onOpenDetail }: BoardProps) {
       <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto pb-2">
         {BOARD_COLUMNS.map(({ status, symbol, label }) => {
           const column = actions.filter((a) => a.status === status);
-          const isDropTarget = approver && (status === 'approved' || status === 'rejected');
+          // QA #11：所有列都注册 drop——非法落点由 transitionIntent 判定并走 notice 提示，
+          // 不再因未注册 handler 被浏览器静默取消；仅 pending 卡可拖且需审批权
+          const isDropTarget = approver;
           return (
             <div
               key={status}
@@ -108,7 +115,7 @@ export function Board({ onOpenDetail }: BoardProps) {
                   <ActionCard
                     key={action.id}
                     action={action}
-                    draggable={!busy && action.status === 'pending'}
+                    draggable={!busy && approver && action.status === 'pending'}
                     onOpen={onOpenDetail}
                     onDragStart={onDragStart}
                   />

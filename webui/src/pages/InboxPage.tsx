@@ -2,6 +2,7 @@
  * 收件箱页（PRD v0.7）：需要我处理的更新——审批/ACK/升级/告警通知。
  */
 import { useCallback, useEffect, useState } from 'react';
+import { api, ApiError } from '../api/client';
 
 interface Alert { id: string; event: string; resource: string; severity: string; status: string; text: string | undefined; timestamp: string }
 interface PendingAction { id: string; command: string; riskLevel: string; actorType: string; actorName: string | undefined; reason: string | undefined; createdAt: string }
@@ -13,14 +14,16 @@ export function InboxPage() {
 
   const load = useCallback(async () => {
     try {
-      const [alertRes, actionRes] = await Promise.all([
-        fetch('/api/v1/alerts?status=open', { credentials: 'include' }),
-        fetch('/api/v1/actions?status=pending', { credentials: 'include' }),
+      const [alertPage, actionPage] = await Promise.all([
+        api.listAlerts('open'),
+        api.listActions({ status: 'pending' }),
       ]);
-      if (alertRes.ok) setAlerts(((await alertRes.json()) as { alerts: Alert[] }).alerts);
-      if (actionRes.ok) setPending(((await actionRes.json()) as { actions: PendingAction[] }).actions);
+      setAlerts(alertPage.alerts as unknown as readonly Alert[]);
+      setPending(actionPage.actions as unknown as readonly PendingAction[]);
       setError(undefined);
-    } catch { setError('网络不可达'); }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '加载失败');
+    }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -55,7 +58,7 @@ export function InboxPage() {
           alerts.map((a) => (
             <div key={a.id} className="mb-2 rounded-lg border border-card-border bg-card p-3">
               <div className="flex items-center gap-2">
-                <span className={`text-ui-sm ${a.severity === 'critical' ? 'text-destructive' : 'text-warning'}`}>{a.severity}</span>
+                <span className={`text-ui-sm ${a.severity === 'critical' ? 'text-destructive' : a.severity === 'warning' ? 'text-warning' : 'text-foreground-subtle'}`}>{a.severity}</span>
                 <span className="font-mono text-ui-sm">{a.event}</span>
                 <span className="text-ui-caption text-foreground-subtle">{a.resource}</span>
               </div>

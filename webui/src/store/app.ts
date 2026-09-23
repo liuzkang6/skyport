@@ -15,6 +15,7 @@ interface AppState {
   user: ApiUser | undefined;
   theme: Theme;
   actions: readonly ApiAction[];
+  boardHasMore: boolean;
   boardError: string | undefined;
   loading: boolean;
   booted: boolean;
@@ -56,6 +57,7 @@ export const useApp = create<AppState>((set, get) => ({
   user: undefined,
   theme: 'light',
   actions: [],
+  boardHasMore: false,
   boardError: undefined,
   loading: false,
   booted: false,
@@ -87,7 +89,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   logout: async () => {
     await api.logout().catch(() => undefined);
-    set({ user: undefined, view: 'login', actions: [] });
+    set({ user: undefined, view: 'login', actions: [], boardHasMore: false });
     history.pushState(null, '', '/login');
   },
 
@@ -103,7 +105,7 @@ export const useApp = create<AppState>((set, get) => ({
     set({ loading: true });
     try {
       const page = await api.listActions();
-      set({ actions: page.actions, boardError: undefined, loading: false });
+      set({ actions: page.actions, boardHasMore: page.hasMore, boardError: undefined, loading: false });
     } catch (error) {
       set({ loading: false, boardError: error instanceof Error ? error.message : '刷新失败' });
     }

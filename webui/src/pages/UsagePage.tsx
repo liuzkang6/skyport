@@ -2,6 +2,7 @@
  * Token 用量看板（PRD v0.7）：按模型/agent 分组展示消耗，支持时间范围切换。
  */
 import { useCallback, useEffect, useState } from 'react';
+import { api, ApiError } from '../api/client';
 
 interface UsageSummary {
   totalPromptTokens: number;
@@ -18,11 +19,11 @@ export function UsagePage() {
 
   const load = useCallback(async (h: number) => {
     try {
-      const res = await fetch(`/api/v1/usage/summary?hours=${h}`, { credentials: 'include' });
-      if (!res.ok) { setError(`加载失败: ${res.status}`); return; }
-      setData((await res.json()) as UsageSummary);
+      setData((await api.usageSummary(h)) as unknown as UsageSummary);
       setError(undefined);
-    } catch { setError('网络不可达'); }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '加载失败');
+    }
   }, []);
 
   useEffect(() => { void load(hours); }, [hours, load]);
@@ -83,6 +84,7 @@ export function UsagePage() {
           ))}
         </tbody>
       </table>
+      {Object.keys(data.byModel).length === 0 && <div className="mt-2 text-ui-caption text-foreground-subtle">暂无数据（周期内没有 LLM 调用）</div>}
 
       <h2 className="mb-2 text-ui-base font-medium">按 Agent</h2>
       <table className="w-full rounded-lg border border-card-border bg-card text-ui-sm">
@@ -105,6 +107,7 @@ export function UsagePage() {
           ))}
         </tbody>
       </table>
+      {Object.keys(data.byAgent).length === 0 && <div className="mt-2 text-ui-caption text-foreground-subtle">暂无数据（周期内没有 LLM 调用）</div>}
     </div>
   );
 }

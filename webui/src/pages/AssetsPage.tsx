@@ -2,6 +2,7 @@
  * 资产列表页（PRD v0.7）：消费 /api/v1/assets，展示类型/地址/状态/标签。
  */
 import { useCallback, useEffect, useState } from 'react';
+import { api, ApiError } from '../api/client';
 
 interface Asset {
   id: string; name: string; type: string; addr: string | null;
@@ -18,12 +19,12 @@ export function AssetsPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/assets', { credentials: 'include' });
-      if (!res.ok) { setError(`加载失败: ${res.status}`); return; }
-      const data = (await res.json()) as { assets: Asset[] };
-      setAssets(data.assets);
+      const data = await api.listAssets();
+      setAssets(data.assets as unknown as readonly Asset[]);
       setError(undefined);
-    } catch { setError('网络不可达'); }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '加载失败');
+    }
   }, []);
 
   useEffect(() => { void load(); }, [load]);

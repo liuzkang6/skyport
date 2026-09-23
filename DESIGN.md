@@ -147,6 +147,10 @@ skyport 是 管理型（AI 运维行动与治理工作台） 界面。设计基�
 
 ### 3.3 角色→token 用法索引
 
+> 实施对齐记录（2026-09-23，QA #6）：语义色统一使用 success（不使用 positive 别名）；
+> success/warning/destructive 的 *-foreground 已按上表在 styles.css @theme 补齐（此前实现遗漏，
+> 导致徽章文字压同色背景）。本节 token 值未变更。
+
 - 页面根 `bg-background + text-foreground`；软分区 `bg-background-alt`；结构面（header/panel/sidebar）只作布局，**不复用为卡片色**
 - 内容容器 `bg-card`（或低强调 `bg-surface`）；选中卡 `bg-card-selected`；浮层 `bg-popover` / 菜单 `bg-menu`
 - hover 用 `bg-hover`，选中用 `bg-selected`；主按钮 `bg-primary text-primary-foreground`

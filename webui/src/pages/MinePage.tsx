@@ -3,9 +3,11 @@
  * 数据源 GET /api/v1/actions?actor=<用户名>（红队 U5：human 用户名可过滤）。
  */
 import { useCallback, useEffect, useState } from 'react';
+import { api, ApiError } from '../api/client';
 import { useApp } from '../store/app';
+import type { ApiAction } from '../api/types';
+import { formatDateTime } from '../lib/time';
 
-interface MyAction { id: string; command: string; status: string; riskLevel: string; targetName: string; createdAt: string }
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待审批', approved: '已放行', executing: '执行中', success: '成功', failed: '失败', rejected: '已否决', cancelled: '已取消', expired: '已过期',
@@ -14,23 +16,25 @@ const STATUS_LABEL: Record<string, string> = {
 const STATUS_STYLE: Record<string, string> = {
   pending: 'bg-warning text-warning-foreground',
   executing: 'bg-warning text-warning-foreground',
-  success: 'bg-positive text-positive-foreground',
+  success: 'bg-success text-success-foreground',
   failed: 'bg-destructive text-destructive-foreground',
   rejected: 'bg-destructive text-destructive-foreground',
 };
 
 export function MinePage() {
   const user = useApp((s) => s.user);
-  const [mine, setMine] = useState<readonly MyAction[]>([]);
+  const [mine, setMine] = useState<readonly ApiAction[]>([]);
   const [error, setError] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     if (user === undefined) return;
     try {
-      const res = await fetch(`/api/v1/actions?actor=${encodeURIComponent(user.name)}&limit=100`, { credentials: 'include' });
-      if (res.ok) setMine(((await res.json()) as { actions: MyAction[] }).actions);
+      const page = await api.listActions({ actor: user.name, limit: 100 });
+      setMine(page.actions);
       setError(undefined);
-    } catch { setError('网络不可达'); }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '加载失败');
+    }
   }, [user]);
 
   useEffect(() => { void load(); }, [load]);
@@ -55,7 +59,7 @@ export function MinePage() {
                   {a.riskLevel}
                 </span>
                 <span className="text-ui-caption text-foreground-subtle">{a.targetName}</span>
-                <span className="ml-auto shrink-0 text-ui-caption text-foreground-subtlest">{a.createdAt}</span>
+                <span className="ml-auto shrink-0 text-ui-caption text-foreground-subtlest">{formatDateTime(a.createdAt)}</span>
               </div>
               <div className="mt-1 break-all font-mono text-ui-sm">{a.command}</div>
             </li>

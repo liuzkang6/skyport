@@ -73,11 +73,18 @@ export function listActions(filter: ListActionsFilter = {}): ActionPage {
     } catch {
       // 保持原值
     }
+    // human 对称处理（QA #2）：行动的 actor_id 存用户 ID（usr_*），
+    // 传入用户名时先解析成 ID，否则"我的"页永远查不到
+    let actorHuman = filter.actor;
+    const userRow = getDb().prepare('SELECT id FROM users WHERE name = ?').get(filter.actor) as
+      | { id: string }
+      | undefined;
+    if (userRow !== undefined) actorHuman = userRow.id;
     conditions.push(
       "((a.actor_type = 'agent' AND a.actor_id = @actor) OR (a.actor_type = 'human' AND a.actor_id = @actorHuman))",
     );
     params.actor = actorKey;
-    params.actorHuman = filter.actor;
+    params.actorHuman = actorHuman;
   }
   if (filter.scopePatterns !== undefined && filter.scopePatterns.length > 0) {
     // 读侧资产范围（红队 V5）：SQL 层过滤保证分页正确。
@@ -88,13 +95,16 @@ export function listActions(filter: ListActionsFilter = {}): ActionPage {
     });
     conditions.push(`(${clauses.join(' OR ')})`);
   }
-  const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';  const limit = filter.limit ?? DEFAULT_PAGE_SIZE;
+  const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+  const limit = filter.limit ?? DEFAULT_PAGE_SIZE;
   const offset = filter.offset ?? 0;
   const rows = getDb()
     .prepare(`${ACTION_SELECT}${where} ORDER BY a.created_at DESC LIMIT @limit OFFSET @offset`)
     .all({ ...params, limit: limit + 1, offset }) as ActionRow[];
   const hasMore = rows.length > limit;
-  return { actions: rows.slice(0, limit).map(rowToAction), hasMore };
+  // 总数（QA #3：审计页"共 N 条"与分页依据；与列表同 WHERE 口径）
+  const totalRow = getDb().prepare(`SELECT COUNT(*) AS n FROM actions a${where}`).get({ ...params, limit: undefined, offset: undefined }) as { n: number };
+  return { actions: rows.slice(0, limit).map(rowToAction), hasMore, total: totalRow.n, limit, offset };
 }
 
 export function getAction(actionId: string): Action {

@@ -4,6 +4,8 @@
  * 交接班 = 一键生成现场快照（开放告警/待审批/资产健康 + 手写备注）。
  */
 import { useCallback, useEffect, useState } from 'react';
+import { api, ApiError } from '../api/client';
+import { formatShort } from '../lib/time';
 
 interface GovernanceReport {
   period: { since: string; until: string };
@@ -70,11 +72,11 @@ export function GovernancePage() {
 
   const loadReport = useCallback(async (h: number) => {
     try {
-      const res = await fetch(`/api/v1/governance/report?hours=${h}`, { credentials: 'include' });
-      if (!res.ok) { setError(`加载失败: ${res.status}`); return; }
-      setReport((await res.json()) as GovernanceReport);
+      setReport((await api.governanceReport(h)) as unknown as GovernanceReport);
       setError(undefined);
-    } catch { setError('网络不可达'); }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '加载失败');
+    }
   }, []);
 
   useEffect(() => { if (tab === 'report') void loadReport(hours); }, [tab, hours, loadReport]);
@@ -123,10 +125,10 @@ function ReportView({ report }: { report: GovernanceReport | undefined }) {
     <div>
       <div className={`mb-6 rounded-xl border p-4 ${report.audit.chainIntact ? 'border-card-border bg-card' : 'border-destructive bg-destructive/10'}`}>
         <div className="flex items-center gap-2">
-          <span className={report.audit.chainIntact ? 'text-positive' : 'text-destructive'}>{report.audit.chainIntact ? '✓' : '✗'}</span>
+          <span className={report.audit.chainIntact ? 'text-success' : 'text-destructive'}>{report.audit.chainIntact ? '✓' : '✗'}</span>
           <span className="text-ui-base font-medium">审计链 {report.audit.chainIntact ? '完整' : '已断裂'}</span>
           <span className="text-ui-caption text-foreground-subtle">（校验 {report.audit.checked} 条记录）</span>
-          <span className="ml-auto text-ui-caption text-foreground-subtlest">周期 {report.period.since.slice(0, 10)} ~ {report.period.until.slice(0, 10)}</span>
+          <span className="ml-auto text-ui-caption text-foreground-subtlest">周期 {formatShort(report.period.since)} ~ {formatShort(report.period.until)}</span>
         </div>
       </div>
 
@@ -188,9 +190,7 @@ function HandoverView() {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch('/api/v1/handover/latest', { credentials: 'include' });
-        if (!res.ok) return;
-        const body = (await res.json()) as { snapshot?: HandoverSnapshot };
+        const body = (await api.latestHandover()) as { snapshot?: HandoverSnapshot };
         if (body.snapshot !== undefined) setSnapshot(body.snapshot);
       } catch { /* 静默 */ }
     })();
@@ -199,16 +199,13 @@ function HandoverView() {
   const generate = useCallback(async () => {
     setBusy(true);
     try {
-      const res = await fetch('/api/v1/handover', {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notes }),
-      });
-      if (!res.ok) { setError(`生成失败: ${res.status}`); return; }
-      setSnapshot((await res.json()) as HandoverSnapshot);
+      setSnapshot((await api.createHandover(notes)) as unknown as HandoverSnapshot);
       setError(undefined);
-    } catch { setError('网络不可达'); }
-    finally { setBusy(false); }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '生成失败');
+    } finally {
+      setBusy(false);
+    }
   }, [notes]);
 
   return (
@@ -236,7 +233,7 @@ function HandoverView() {
         <div className="text-ui-caption text-foreground-subtle">点击上方按钮，按当前系统现场生成快照</div>
       ) : (
         <div>
-          <div className="mb-3 text-ui-caption text-foreground-subtle">快照时间 {snapshot.generatedAt.replace('T', ' ').slice(0, 19)}</div>
+          <div className="mb-3 text-ui-caption text-foreground-subtle">快照时间 {formatShort(snapshot.generatedAt)}</div>
           <div className="mb-6 grid grid-cols-3 gap-4">
             <div className="rounded-xl border border-card-border bg-card p-4">
               <div className="text-ui-xs text-foreground-subtle">开放告警</div>
@@ -283,7 +280,7 @@ function HandoverView() {
           <h2 className="mb-2 text-ui-base font-medium">资产健康</h2>
           <div className="flex flex-wrap gap-2">
             {snapshot.assetHealth.map((a) => (
-              <span key={a.name} className={`rounded-lg border px-3 py-1 text-ui-sm ${a.status === 'healthy' ? 'border-positive/40 text-positive' : a.status === 'down' ? 'border-destructive/40 text-destructive' : 'border-card-border text-foreground-subtle'}`}>
+              <span key={a.name} className={`rounded-lg border px-3 py-1 text-ui-sm ${a.status === 'healthy' ? 'border-success/40 text-success' : a.status === 'down' ? 'border-destructive/40 text-destructive' : 'border-card-border text-foreground-subtle'}`}>
                 {a.name} · {a.status}
               </span>
             ))}

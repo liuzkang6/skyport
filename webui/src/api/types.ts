@@ -20,6 +20,9 @@ export interface ApiAction {
 export interface ApiActionPage {
   readonly actions: readonly ApiAction[];
   readonly hasMore: boolean;
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
 }
 
 export interface ApiUser {

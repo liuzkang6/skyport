@@ -227,6 +227,13 @@ describe('WebUI 会话与审批（spec/webui）', () => {
     expect(action?.status === 'success' || action?.status === 'executing' || action?.status === 'approved').toBe(true);
   });
 
+  it('SSE 鉴权（QA #4）：无凭证挂流 → 401，不泄漏事件', async () => {
+    serve = await startServe({ port: 0 });
+    const res = await fetch(`http://127.0.0.1:${serve.port}/api/v1/events/stream`);
+    expect(res.status).toBe(401);
+    await res.text();
+  });
+
   it('SSE 实时事件流：挂流后审批/否决行动，客户端收到广播事件', async () => {
     createUser('sse-approver', 'password8', 'approver');
     const pending = await createAction({
@@ -239,9 +246,9 @@ describe('WebUI 会话与审批（spec/webui）', () => {
     serve = await startServe({ port: 0 });
     const cookie = cookieOf(await loginWeb('sse-approver', 'password8'));
 
-    // 挂 SSE 流：fetch 流式读取，攒进缓冲区轮询解析
+    // 挂 SSE 流（带会话 cookie——QA #4 之后事件流需要认证）：fetch 流式读取，攒进缓冲区轮询解析
     const controller = new AbortController();
-    const stream = await fetch(`http://127.0.0.1:${serve.port}/api/v1/events/stream`, { signal: controller.signal });
+    const stream = await fetch(`http://127.0.0.1:${serve.port}/api/v1/events/stream`, { signal: controller.signal, headers: { cookie: cookie } });
     expect(stream.headers.get('content-type')).toBe('text/event-stream');
     const reader = stream.body!.getReader();
     const chunks: string[] = [];
@@ -444,6 +451,89 @@ describe('告警闭环 REST（spec/alert-dispatcher）', () => {
     const latest = await fetchWeb('/api/v1/handover/latest', { cookie });
     expect((latest.body as { createdBy?: string }).createdBy).toContain('human:');
     expect((latest.body as { snapshot?: { notes?: string } }).snapshot?.notes).toBe('REST 落库验证');
+  });
+});
+
+describe('QA 修复回归（docs/webui-qa-report.md）', () => {
+  it('#2 我的页：human 用户名过滤能查到本人行动', async () => {
+    createUser('qa-mine', 'password8', 'approver');
+    serve = await startServe({ port: 0 });
+    const cookie = cookieOf(await loginWeb('qa-mine', 'password8'));
+    const created = await fetchWeb('/api/v1/actions', {
+      method: 'POST', cookie,
+      body: JSON.stringify({ command: 'echo mine-page-fix', reason: 'QA #2' }),
+    });
+    expect(created.status).toBe(201);
+    const mine = await fetchWeb('/api/v1/actions?actor=qa-mine', { cookie });
+    const ids = (mine.body.actions as { id: string }[]).map((a) => a.id);
+    expect(ids).toContain((created.body.action as { id: string }).id);
+  });
+
+  it('#3 分页：total/offset 生效（hasMore 可消费）', async () => {
+    createUser('qa-page', 'password8', 'approver');
+    serve = await startServe({ port: 0 });
+    const cookie = cookieOf(await loginWeb('qa-page', 'password8'));
+    for (let i = 0; i < 3; i += 1) {
+      await fetchWeb('/api/v1/actions', { method: 'POST', cookie, body: JSON.stringify({ command: `echo page-${i}` }) });
+    }
+    const page1 = await fetchWeb('/api/v1/actions?limit=2&offset=0', { cookie });
+    expect((page1.body.actions as unknown[])).toHaveLength(2);
+    expect((page1.body as { total: number }).total).toBeGreaterThanOrEqual(3);
+    expect((page1.body as { hasMore: boolean }).hasMore).toBe(true);
+    const page2 = await fetchWeb('/api/v1/actions?limit=2&offset=2', { cookie });
+    expect((page2.body.actions as unknown[])).toHaveLength(1);
+  });
+
+  it('#9 创建行动能力门禁：viewer → 403，operator → 201', async () => {
+    createUser('qa-viewer9', 'password8', 'viewer');
+    createUser('qa-operator9', 'password8', 'operator');
+    serve = await startServe({ port: 0 });
+    const viewer = cookieOf(await loginWeb('qa-viewer9', 'password8'));
+    const operator = cookieOf(await loginWeb('qa-operator9', 'password8'));
+    const denied = await fetchWeb('/api/v1/actions', { method: 'POST', cookie: viewer, body: JSON.stringify({ command: 'echo x' }) });
+    expect(denied.status).toBe(403);
+    const ok = await fetchWeb('/api/v1/actions', { method: 'POST', cookie: operator, body: JSON.stringify({ command: 'echo y' }) });
+    expect(ok.status).toBe(201);
+  });
+
+  it('#7 语义状态码：未知模型删除 → 404；空名保存 → 400；hours=abc → 400', async () => {
+    createUser('qa-code', 'password8', 'approver');
+    serve = await startServe({ port: 0 });
+    const cookie = cookieOf(await loginWeb('qa-code', 'password8'));
+    const del = await fetchWeb('/api/v1/models/no-such-model', { method: 'DELETE', cookie });
+    expect(del.status).toBe(404);
+    expect((del.body as { error: string }).error).toContain('不存在');
+    const badSave = await fetchWeb('/api/v1/models', { method: 'POST', cookie, body: JSON.stringify({ name: '', baseUrl: 'https://x/v1', modelId: 'm', apiKey: 'k' }) });
+    expect(badSave.status).toBe(400);
+    const badHours = await fetchWeb('/api/v1/usage/summary?hours=abc', { cookie });
+    expect(badHours.status).toBe(400);
+  });
+
+  it('#16 baselines 端点索引修复：按资产名可查（此前必然 404）', async () => {
+    addAsset({ name: 'qa-baseline-host', type: 'host', addr: '10.0.0.99' });
+    createUser('qa-base', 'password8', 'approver');
+    serve = await startServe({ port: 0 });
+    const cookie = cookieOf(await loginWeb('qa-base', 'password8'));
+    const res = await fetchWeb('/api/v1/baselines/qa-baseline-host', { cookie });
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.baselines)).toBe(true);
+  });
+
+  it('#1 保险箱真接口：POST 保存 → GET 列表（值不回传，只有 hint）', async () => {
+    createUser('qa-vault', 'password8', 'approver');
+    serve = await startServe({ port: 0 });
+    const cookie = cookieOf(await loginWeb('qa-vault', 'password8'));
+    const saved = await fetchWeb('/api/v1/secrets', { method: 'POST', cookie, body: JSON.stringify({ name: 'qa-secret', value: 'plain-value-xyz' }) });
+    expect(saved.status).toBe(201);
+    expect(JSON.stringify(saved.body)).not.toContain('plain-value-xyz');
+    const list = await fetchWeb('/api/v1/secrets', { cookie });
+    const names = (list.body.secrets as { name: string }[]).map((x) => x.name);
+    expect(names).toContain('qa-secret');
+    // viewer 写保险箱被拒
+    createUser('qa-vault-viewer', 'password8', 'viewer');
+    const viewer = cookieOf(await loginWeb('qa-vault-viewer', 'password8'));
+    const denied = await fetchWeb('/api/v1/secrets', { method: 'POST', cookie: viewer, body: JSON.stringify({ name: 'x', value: 'y' }) });
+    expect(denied.status).toBe(403);
   });
 });
 

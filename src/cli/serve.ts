@@ -171,6 +171,8 @@ function mapErrorToStatus(type: string): number {
   if (type === 'SKYPORT_USER_LOCKED') return 429;
   if (type === 'SKYPORT_USER_DUPLICATE_NAME' || type === 'SKYPORT_ACTION_INVALID_STATE') return 409;
   if (type === 'SKYPORT_USER_INVALID') return 400;
+  if (type === ERROR_CODES.CONFIG_INVALID) return 400; // QA #7：非法配置载荷此前落兜底 500
+  if (type.startsWith('SKYPORT_CONFIG_NOT')) return 404; // QA #7：配置不存在按资源缺失语义
   if (type.startsWith('SKYPORT_ASSET_NOT') || type.startsWith('SKYPORT_ACTION_NOT') || type.startsWith('SKYPORT_AGENT_NOT') || type === 'SKYPORT_USER_NOT_FOUND') return 404;
   if (type.startsWith('SKYPORT_ACTION_INVALID') || type.startsWith('SKYPORT_ASSET_INVALID') || type.startsWith('SKYPORT_AGENT_INVALID')) return 400;
   return 500;
@@ -364,6 +366,12 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   // SSE 事件流（spec/webui：实时推送告警/状态变更；连接注册进表，broadcastEvent 全体推送）
   if (method === 'GET' && path === '/api/v1/events/stream') {
+    // QA #4（安全）：SSE 与其他数据端点同口径要求凭证——
+    // 未认证连接此前可监听全部业务事件（行动 ID/操作者），EventSource 同源自动带 cookie，前端零改动
+    if (resolveAuth(req) === undefined) {
+      sendJson(res, 401, { error: '缺少凭证（登录后再订阅事件流）', type: ERROR_CODES.AUTH_REQUIRED });
+      return;
+    }
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -452,14 +460,28 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (method === 'GET' && path === '/api/v1/actions') {
     const status = url.searchParams.get('status') ?? undefined;
     const actorFilter = url.searchParams.get('actor') ?? undefined; // "我的"视图：按创建者过滤（红队 U5：human 用户名或 agent 名）
-    const limit = Number(url.searchParams.get('limit') ?? '50');
-    const page = listActions({ status: status as never, actor: actorFilter, limit, scopePatterns: agentOrNull(actor.actor)?.assetPatterns });
+    const limit = Math.min(Number(url.searchParams.get('limit') ?? '50'), 500);
+    const offset = Math.max(Number(url.searchParams.get('offset') ?? '0'), 0); // QA #3：审计页分页
+    const page = listActions({ status: status as never, actor: actorFilter, limit, offset, scopePatterns: agentOrNull(actor.actor)?.assetPatterns });
     sendJson(res, 200, page);
     return;
   }
 
   // 创建行动（REST 权威接口补全）：Bearer actor 或 Web 会话均可；风险引擎照常裁决
   if (method === 'POST' && path === '/api/v1/actions') {
+    // QA #9：创建行动补服务端能力复核（与前端权限镜像一致——viewer 只读）
+    // Web 会话：operator+；agent 令牌：scopes 必须含 action:create
+    if (actor.actor.type === 'agent') {
+      const { getAgent } = await import('../services/agents');
+      const agent = getAgent(actor.actor.id);
+      if (!agent.scopes.includes('action:create')) {
+        sendJson(res, 403, { error: `agent ${actor.actor.name} 无 action:create 权限`, type: ERROR_CODES.PERMISSION_DENIED });
+        return;
+      }
+    } else if (actor.user === undefined || !can(actor.user.role, 'action:create')) {
+      sendJson(res, 403, { error: `角色 ${actor.user?.role ?? '未知'} 无权创建行动（需要 action:create）`, type: ERROR_CODES.PERMISSION_DENIED });
+      return;
+    }
     const body = (await readBody(req)) as {
       command?: unknown; target?: unknown; reason?: unknown;
       riskHint?: unknown; rollback?: unknown; dryRun?: unknown;
@@ -580,14 +602,14 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (method === 'PATCH' && path.startsWith('/api/v1/alerts/') && path.endsWith('/ack')) {
     requireCapability(req, 'alerts:write');
     const id = decodeURIComponent(path.split('/')[4] ?? '');
-    sendJson(res, 200, ackAlert(decodeURIComponent(id)));
+    sendJson(res, 200, ackAlert(id));
     return;
   }
 
   if (method === 'PATCH' && path.startsWith('/api/v1/alerts/') && path.endsWith('/close')) {
     requireCapability(req, 'alerts:write');
     const id = decodeURIComponent(path.split('/')[4] ?? '');
-    sendJson(res, 200, closeAlert(decodeURIComponent(id)));
+    sendJson(res, 200, closeAlert(id));
     return;
   }
 
@@ -617,6 +639,11 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (method === 'GET' && path === '/api/v1/usage/summary') {
     const { getUsageSummary } = await import('../services/usage');
     const hours = Number(url.searchParams.get('hours') ?? '24');
+    // QA #7：非数字/非正数此前在日期计算里炸成 500
+    if (!Number.isFinite(hours) || hours <= 0) {
+      sendJson(res, 400, { error: 'hours 必须是正整数（小时）', type: ERROR_CODES.CONFIG_INVALID });
+      return;
+    }
     sendJson(res, 200, getUsageSummary(hours));
     return;
   }
@@ -684,7 +711,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // ── 基线查询（v0.4/v0.7）──
   if (method === 'GET' && path.startsWith('/api/v1/baselines/')) {
     const { getBaselines } = await import('../services/baseline');
-    const assetName = decodeURIComponent(path.split('/')[3] ?? '');
+    const assetName = decodeURIComponent(path.split('/')[4] ?? ''); // QA #16：[3] 恒为 'baselines'，端点此前必然 404
     const { getAsset } = await import('../services/assets');
     const asset = getAsset(assetName);
     sendJson(res, 200, { baselines: getBaselines(asset.id) });
@@ -699,6 +726,26 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   // ── 剧本列表（v0.6/v0.7）──
+  // ── 保险箱（QA #1：设置页此前是假保存——纯前端 setState，后端无端点）──
+  if (method === 'GET' && path === '/api/v1/secrets') {
+    const { listSecrets } = await import('../services/vault');
+    sendJson(res, 200, { secrets: listSecrets() });
+    return;
+  }
+
+  if (method === 'POST' && path === '/api/v1/secrets') {
+    requireCapability(req, 'action:approve'); // 写保险箱与模型配置同级（高权限）
+    const body = (await readBody(req)) as { name?: unknown; value?: unknown };
+    if (typeof body.name !== 'string' || body.name.trim() === '' || typeof body.value !== 'string' || body.value === '') {
+      sendJson(res, 400, { error: 'name 与 value 必填', type: ERROR_CODES.CONFIG_INVALID });
+      return;
+    }
+    const { setSecret } = await import('../services/vault');
+    const record = setSecret(body.name.trim(), body.value);
+    sendJson(res, 201, { secret: record }); // SecretRecord 不含明文值（只有尾4位 hint）
+    return;
+  }
+
   // ── 技能注册表（spec/llm-seat：skills/*/SKILL.md frontmatter）──
   if (method === 'GET' && path === '/api/v1/skills') {
     const { listSkills } = await import('../services/skills-registry');

@@ -2,7 +2,9 @@
  * Agent 操作台（PRD v0.7）：对话式 AI 协作界面 + 态势包展示 + 内联审批卡片。
  * 值班人在一个页面里看 AI 干活、追问、批准——全程不换页。
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api, ApiError } from '../api/client';
+import { formatShort } from '../lib/time';
 
 interface ContextPack {
   asset: { name: string; type: string; addr: string | null; status: string; labels: Record<string, string>;
@@ -27,43 +29,62 @@ export function ConsolePage() {
   const [error, setError] = useState<string | undefined>(undefined);
   const [message, setMessage] = useState('');
   const [actionNotice, setActionNotice] = useState<string | undefined>(undefined);
+  const [packLoading, setPackLoading] = useState(false);
+  const pendingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const loadPack = useCallback(async (name: string) => {
-    if (name.trim() === '') return;
+    // QA #14：空输入此前静默无反应
+    if (name.trim() === '') { setError('请输入资产名再查询'); return; }
+    setPackLoading(true);
     try {
-      const res = await fetch(`/api/v1/context/${encodeURIComponent(name)}`, { credentials: 'include' });
-      if (!res.ok) { setError(`态势包加载失败: ${res.status}`); return; }
-      setPack((await res.json()) as ContextPack);
+      setPack((await api.context(name.trim())) as unknown as ContextPack);
       setError(undefined);
-    } catch { setError('网络不可达'); }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '态势包加载失败');
+    } finally {
+      setPackLoading(false);
+    }
   }, []);
 
   const loadPending = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/actions?status=pending', { credentials: 'include' });
-      if (!res.ok) return;
-      const data = (await res.json()) as { actions: PendingAction[] };
-      setPending(data.actions);
-    } catch { /* 静默 */ }
+      const page = await api.listActions({ status: 'pending' });
+      setPending(page.actions);
+    } catch { /* 静默：轮询失败不打扰 */ }
   }, []);
 
-  useEffect(() => { void loadPending(); }, [loadPending]);
+  // QA #14：待审批列表随轮询刷新（8s，与看板同节奏），新 pending 不再漏
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      await loadPending();
+      if (!cancelled) pendingTimer.current = setTimeout(tick, 8_000);
+    };
+    void tick();
+    return () => { cancelled = true; if (pendingTimer.current !== undefined) clearTimeout(pendingTimer.current); };
+  }, [loadPending]);
 
   const approve = async (id: string) => {
     setActionNotice(undefined);
     try {
-      const res = await fetch(`/api/v1/actions/${id}/approve`, { method: 'POST', credentials: 'include' });
-      if (res.ok) { setActionNotice(`✓ ${id} 已批准并执行`); void loadPending(); }
-      else { const body = (await res.json().catch(() => ({}))) as { error?: string }; setActionNotice(`✕ ${id}: ${body.error ?? res.statusText}`); }
-    } catch { setActionNotice('✕ 网络不可达'); }
+      await api.approve(id);
+      setActionNotice(`✓ ${id} 已批准并执行`);
+      void loadPending();
+    } catch (e) {
+      setActionNotice(`✕ ${id}: ${e instanceof ApiError ? e.message : '操作失败'}`);
+    }
   };
 
   const reject = async (id: string) => {
     setActionNotice(undefined);
     try {
-      const res = await fetch(`/api/v1/actions/${id}/reject`, { method: 'POST', credentials: 'include' });
-      if (res.ok) { setActionNotice(`已否决 ${id}`); void loadPending(); }
-    } catch { setActionNotice('✕ 网络不可达'); }
+      await api.reject(id);
+      setActionNotice(`已否决 ${id}`);
+      void loadPending();
+    } catch (e) {
+      setActionNotice(`✕ ${id}: ${e instanceof ApiError ? e.message : '操作失败'}`);
+    }
   };
 
   return (
@@ -79,6 +100,7 @@ export function ConsolePage() {
           value={assetName}
           onChange={(e) => setAssetName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void loadPack(assetName); }}
+          aria-label="资产名"
           placeholder="输入资产名查看态势包…"
           className="flex-1 rounded-lg border border-input-border bg-input px-3 py-1.5 text-ui-base text-foreground placeholder:text-foreground-subtlest"
         />
@@ -89,6 +111,7 @@ export function ConsolePage() {
       </div>
 
       {error !== undefined && <div className="mb-4 text-ui-base text-destructive">{error}</div>}
+      {packLoading && <div className="mb-4 text-ui-caption text-foreground-subtle">态势包加载中…</div>}
       {actionNotice !== undefined && <div className="mb-4 text-ui-base text-foreground">{actionNotice}</div>}
 
       <div className="flex gap-4">
@@ -110,7 +133,7 @@ export function ConsolePage() {
                   <div className="text-ui-xs text-foreground-subtle">开放告警</div>
                   {pack.openAlerts.map((a) => (
                     <div key={a.id} className="mt-1 flex items-center gap-2 text-ui-sm">
-                      <span className={a.severity === 'critical' ? 'text-destructive' : 'text-warning'}>{a.severity}</span>
+                      <span className={a.severity === 'critical' ? 'text-destructive' : a.severity === 'warning' ? 'text-warning' : 'text-foreground-subtle'}>{a.severity}</span>
                       <span className="font-mono">{a.event}</span>
                     </div>
                   ))}
@@ -183,11 +206,8 @@ function PatrollerCard() {
   useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch('/api/v1/patroller/status', { credentials: 'include' });
-        if (res.ok) {
-          const body = (await res.json()) as { lastSweep: SweepResult | null };
-          setLast(body.lastSweep);
-        }
+        const body = (await api.patrollerStatus()) as { lastSweep: SweepResult | null };
+        setLast(body.lastSweep);
       } catch { /* 静默 */ }
     })();
   }, []);
@@ -196,11 +216,10 @@ function PatrollerCard() {
     setRunning(true);
     setError(undefined);
     try {
-      const res = await fetch('/api/v1/patroller/run', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      if (res.ok) setLast((await res.json()) as SweepResult);
-      else setError(`巡查失败: ${res.status}`);
-    } catch { setError('网络不可达'); }
-    finally { setRunning(false); }
+      setLast((await api.patrollerRun()) as unknown as SweepResult);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '巡查失败');
+    } finally { setRunning(false); }
   }, []);
 
   return (
@@ -208,7 +227,7 @@ function PatrollerCard() {
       <div className="flex items-center gap-3">
         <span className="text-ui-base font-medium">AI 巡查员</span>
         <span className="rounded-md bg-tag px-1.5 py-0.5 text-ui-xs">每 15 分钟自动巡逻</span>
-        {last !== null && <span className="text-ui-caption text-foreground-subtle">最近：{last.completedAt.replace('T', ' ').slice(5, 19)} · {last.modelsUsed}</span>}
+        {last !== null && <span className="text-ui-caption text-foreground-subtle">最近：{formatShort(last.completedAt)} · {last.modelsUsed}</span>}
         <button
           type="button"
           disabled={running}
@@ -223,7 +242,7 @@ function PatrollerCard() {
           {last.anomalies.length > 0 && <span className="ml-2 rounded-md bg-warning/20 px-1.5 py-0.5 text-ui-xs text-warning">异常 {last.anomalies.length}</span>}
           {last.proposals.map((p) => (
             <div key={p.actionId} className="mt-1 rounded-lg bg-surface p-2">
-              <span className={`mr-2 rounded-md px-1.5 py-0.5 text-ui-xs ${p.status === 'success' ? 'bg-positive text-positive-foreground' : p.status === 'pending' ? 'bg-warning text-warning-foreground' : 'bg-destructive text-destructive-foreground'}`}>{p.status}</span>
+              <span className={`mr-2 rounded-md px-1.5 py-0.5 text-ui-xs ${p.status === 'success' ? 'bg-success text-success-foreground' : p.status === 'pending' ? 'bg-warning text-warning-foreground' : 'bg-destructive text-destructive-foreground'}`}>{p.status}</span>
               <span className="font-mono text-ui-xs">{p.target}$ {p.command}</span>
               <span className="ml-2 text-ui-caption text-foreground-subtle">{p.reason}</span>
             </div>

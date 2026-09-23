@@ -37,6 +37,10 @@
   --color-destructive: var(--c-destructive);
   --color-success: var(--c-success);
   --color-warning: var(--c-warning);
+  /* QA #6：前景色 token 此前缺失——徽章文字压同色背景不可读 */
+  --color-destructive-foreground: var(--c-destructive-foreground);
+  --color-success-foreground: var(--c-success-foreground);
+  --color-warning-foreground: var(--c-warning-foreground);
 
   /* 治理色域（DESIGN.md §3.3）：状态/风险独立色族，颜色+符号+文字三编码 */
   --color-gov-pending: var(--c-gov-pending);
@@ -70,7 +74,7 @@
   --c-foreground: #262626;
   --c-foreground-subtle: rgba(38, 38, 38, 0.6);
   --c-foreground-subtlest: rgba(38, 38, 38, 0.4);
-  --c-destructive: #e03131; --c-success: #1e8a3e; --c-warning: #e07b00;
+  --c-destructive: #e03131; --c-destructive-foreground: #ffffff; --c-success: #1e8a3e; --c-success-foreground: #ffffff; --c-warning: #e07b00; --c-warning-foreground: #ffffff;
   --c-gov-pending: #b45309; --c-gov-approved: #0b7fff; --c-gov-executing: #9e77ed;
   --c-gov-success: #1e8a3e; --c-gov-failed: #e03131; --c-gov-rejected: #6b7280;
   --c-gov-cancelled: #9ca3af;
@@ -92,7 +96,7 @@
   --c-foreground: #d1d5db;
   --c-foreground-subtle: rgba(209, 213, 219, 0.6);
   --c-foreground-subtlest: rgba(209, 213, 219, 0.3);
-  --c-destructive: #ff5c5c; --c-success: #46bf72; --c-warning: #ff8a30;
+  --c-destructive: #ff5c5c; --c-destructive-foreground: #ffffff; --c-success: #46bf72; --c-success-foreground: #000000; --c-warning: #ff8a30; --c-warning-foreground: #000000;
   --c-gov-pending: #ff8a30; --c-gov-approved: #4099ff; --c-gov-executing: #7b5ce5;
   --c-gov-success: #46bf72; --c-gov-failed: #ff5c5c; --c-gov-rejected: #9ca3af;
   --c-gov-cancelled: #6b7280;

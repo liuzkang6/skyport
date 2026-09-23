@@ -87,6 +87,10 @@ export interface ActionPage {
   readonly actions: readonly Action[];
   /** 还有更早的记录未展示（达到页大小） */
   readonly hasMore: boolean;
+  /** 命中过滤条件的总数（QA #3：审计页"共 N 条"与分页依据） */
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
 }
 
 /** 登记行动：校验 → 风险评估 → agent 三件套 → 入库 pending →（低危+策略允许）自动批准执行 */

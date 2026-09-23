@@ -82,7 +82,7 @@ export function upsertModelConfig(input: ModelConfigInput): ModelConfigView {
 
 export function deleteModelConfig(name: string): void {
   const row = getDb().prepare('SELECT id FROM model_configs WHERE name = ?').get(name) as { id: number } | undefined;
-  if (row === undefined) throw createError(ERROR_CODES.CONFIG_INVALID, `模型配置不存在: ${name}`, { context: { name } });
+  if (row === undefined) throw createError(ERROR_CODES.CONFIG_NOT_FOUND, `模型配置不存在: ${name}`, { context: { name } });
   getDb().prepare('DELETE FROM model_configs WHERE id = ?').run(row.id);
   try { removeSecret(apiKeyRef(name)); } catch { /* 保险箱无记录则忽略 */ }
 }
@@ -93,7 +93,7 @@ export function listModelConfigs(): ModelConfigView[] {
 
 export function getModelByName(name: string): ModelConfigView {
   const row = getDb().prepare('SELECT * FROM model_configs WHERE name = ?').get(name) as ModelRow | undefined;
-  if (row === undefined) throw createError(ERROR_CODES.CONFIG_INVALID, `模型配置不存在: ${name}`, { context: { name } });
+  if (row === undefined) throw createError(ERROR_CODES.CONFIG_NOT_FOUND, `模型配置不存在: ${name}`, { context: { name } });
   return rowToView(row);
 }
 

@@ -20,7 +20,9 @@ export function LoginPage() {
       await login(username.trim(), password);
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {
-        setError('失败次数过多，账号已锁定 5 分钟，请稍后再试');
+        // QA #15：透出后端给出的精确解锁等待（此前写死"5 分钟"）
+        const minutes = err.retryAfterSeconds !== undefined ? Math.max(1, Math.ceil(err.retryAfterSeconds / 60)) : undefined;
+        setError(minutes === undefined ? '失败次数过多，账号已锁定，请稍后再试' : `失败次数过多，账号已锁定，约 ${minutes} 分钟后解锁`);
       } else if (err instanceof ApiError) {
         setError(err.message);
       } else {

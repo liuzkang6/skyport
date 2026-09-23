@@ -90,14 +90,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               <ul>
                 {section.items.map((item) => (
                   <li key={item.key}>
-                    <span
+                    {/* QA #10：button 化——纯键盘可切换页面，带 aria-current */}
+                    <button
+                      type="button"
                       onClick={() => navigate(item.key as View)}
-                      className={`flex h-8 cursor-pointer items-center rounded-lg px-3 text-ui-base ${
+                      aria-current={view === item.key ? 'page' : undefined}
+                      className={`flex h-8 w-full cursor-pointer items-center rounded-lg px-3 text-left text-ui-base ${
                         view === item.key ? 'bg-selected font-medium text-foreground' : 'text-foreground hover:bg-hover'
                       }`}
                     >
                       {item.label}
-                    </span>
+                    </button>
                   </li>
                 ))}
               </ul>

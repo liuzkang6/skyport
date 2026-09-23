@@ -2,6 +2,7 @@
  * 知识库页（PRD v0.7）：技能库 + 插件 + 剧本 + Analyzer 注册表。
  */
 import { useCallback, useEffect, useState } from 'react';
+import { api, ApiError } from '../api/client';
 
 interface PlaybookItem { name: string; description: string; mode: string; stepCount: number }
 interface AnalyzerItem { name: string; category: string; description: string; types: string[] }
@@ -18,17 +19,16 @@ export function KnowledgePage() {
   const load = useCallback(async () => {
     try {
       const [pb, az, pl, sk] = await Promise.all([
-        fetch('/api/v1/playbooks', { credentials: 'include' }),
-        fetch('/api/v1/analyzers', { credentials: 'include' }),
-        fetch('/api/v1/plugins', { credentials: 'include' }),
-        fetch('/api/v1/skills', { credentials: 'include' }),
+        api.playbooks(), api.analyzers(), api.plugins(), api.skills(),
       ]);
-      if (pb.ok) setPlaybooks(((await pb.json()) as { playbooks: PlaybookItem[] }).playbooks);
-      if (az.ok) setAnalyzers(((await az.json()) as { analyzers: AnalyzerItem[] }).analyzers);
-      if (pl.ok) setPlugins(((await pl.json()) as { plugins: PluginItem[] }).plugins);
-      if (sk.ok) setSkills(((await sk.json()) as { skills: SkillItem[] }).skills);
+      setPlaybooks(pb.playbooks);
+      setAnalyzers(az.analyzers);
+      setPlugins(pl.plugins);
+      setSkills(sk.skills);
       setError(undefined);
-    } catch { setError('网络不可达'); }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '加载失败');
+    }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -62,6 +62,7 @@ export function KnowledgePage() {
 
         <section>
           <h2 className="mb-2 text-ui-base font-medium">剧本（{playbooks.length}）</h2>
+          {playbooks.length === 0 && <div className="text-ui-caption text-foreground-subtle">暂无剧本（内置剧本随网关注册）</div>}
           {playbooks.map((p) => (
             <div key={p.name} className="mb-2 rounded-lg border border-card-border bg-card p-3">
               <div className="flex items-center gap-2">
@@ -76,6 +77,7 @@ export function KnowledgePage() {
 
         <section>
           <h2 className="mb-2 text-ui-base font-medium">Analyzer（{analyzers.length}）</h2>
+          {analyzers.length === 0 && <div className="text-ui-caption text-foreground-subtle">暂无 Analyzer</div>}
           {analyzers.map((a) => (
             <div key={a.name} className="mb-1 flex items-center gap-2 text-ui-sm">
               <span className="font-mono">{a.name}</span>

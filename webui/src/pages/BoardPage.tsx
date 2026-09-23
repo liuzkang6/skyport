@@ -10,7 +10,6 @@ const POLL_BACKOFF_MS = 30_000;
 
 export function BoardPage() {
   const refreshBoard = useApp((s) => s.refreshBoard);
-  const boardError = useApp((s) => s.boardError);
   const user = useApp((s) => s.user);
   const [selected, setSelected] = useState<ApiAction | undefined>(undefined);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -38,7 +37,6 @@ export function BoardPage() {
 
   return (
     <>
-      {boardError === undefined ? null : null /* 错误条在外壳顶栏呈现，保持看板区域干净 */}
       <Board onOpenDetail={setSelected} />
       {drawerAction !== undefined ? (
         <DetailDrawer

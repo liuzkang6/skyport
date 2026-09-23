@@ -6,6 +6,7 @@ import type { DragEvent } from 'react';
 import type { ApiAction } from '../api/types';
 import { RiskBadge, StatusBadge } from './GovBadge';
 import { actorDisplay, truncateCommand } from '../lib/governance';
+import { formatClock } from '../lib/time';
 
 interface ActionCardProps {
   readonly action: ApiAction;
@@ -17,7 +18,7 @@ interface ActionCardProps {
 export function ActionCard({ action, draggable, onOpen, onDragStart }: ActionCardProps) {
   const command = truncateCommand(action.command);
   const actor = actorDisplay(action.actorType, action.actorName, action.actorId);
-  const time = new Date(action.createdAt).toLocaleTimeString('zh-CN', { hour12: false });
+  const time = formatClock(action.createdAt);
 
   return (
     <article
