@@ -16,7 +16,7 @@ const NAV_ITEMS: readonly { key: string; label: string; enabled: boolean; hint: 
   { key: 'knowledge', label: '知识库', enabled: false, hint: '后续切片' },
   { key: 'audit', label: '审计', enabled: true, hint: '' },
   { key: 'usage', label: '用量', enabled: true, hint: '' },
-  { key: 'settings', label: '设置', enabled: false, hint: '后续切片' },
+  { key: 'settings', label: '设置', enabled: true, hint: '' },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
