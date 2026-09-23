@@ -108,3 +108,7 @@ html, body {
   background: var(--c-background);
   color: var(--c-foreground);
 }
+/* 高度链修复：#root 缺高度导致全应用 h-full 塌陷（登录页贴顶的根因） */
+#root {
+  height: 100%;
+}

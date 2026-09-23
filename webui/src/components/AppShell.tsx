@@ -2,7 +2,7 @@
  * 应用外壳：侧栏导航（PRD 拍板命名——本刀只亮"动态"，其余占位置灰）+ 顶栏（主题切换/登出）。
  * 禁用项保留布局仅降文本色（DESIGN.md §5 菜单规则）。
  */
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useApp, type View } from '../store/app';
 
 /** 顶栏语境提示：随当前视图切换 */
@@ -56,9 +56,12 @@ const NAV_SECTIONS: readonly { title: string; items: readonly { key: string; lab
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const [live, setLive] = useState(false);
   // SSE 实时事件流订阅（spec/webui：serve 推送 /api/v1/events/stream）
   useEffect(() => {
     const es = new EventSource('/api/v1/events/stream');
+    es.onopen = () => setLive(true);
+    es.onerror = () => setLive(false);
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data) as { event: string };
@@ -80,10 +83,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-full min-h-0">
       <nav aria-label="主导航" className="flex w-44 shrink-0 flex-col bg-sidebar">
+        <div className="flex min-h-0 flex-1 flex-col">
         <div className="px-4 pb-2 pt-4">
           <span className="text-ui-lg font-semibold">skyport</span>
         </div>
-        <div className="flex-1 overflow-y-auto px-2 pb-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
           {NAV_SECTIONS.map((section) => (
             <section key={section.title} className="mb-3">
               <h3 className="px-3 pb-1 pt-2 text-ui-xs font-medium text-foreground-subtlest">{section.title}</h3>
@@ -107,6 +111,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             </section>
           ))}
         </div>
+        </div>
+        {/* 底部状态区：实时连接 + 版本 */}
+        <footer className="shrink-0 border-t border-border px-4 py-3">
+          <div className="flex items-center gap-2 text-ui-xs text-foreground-subtle">
+            <span aria-hidden className={`inline-block h-1.5 w-1.5 rounded-full ${live ? 'bg-success' : 'bg-warning'}`} />
+            {live ? '实时已连接' : '实时重连中…'}
+          </div>
+          <div className="mt-1 text-ui-xs text-foreground-subtlest">skyport v0.2.0</div>
+        </footer>
       </nav>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border bg-header px-4">
