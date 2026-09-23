@@ -120,8 +120,16 @@ function resolveAuth(req: IncomingMessage): RequestAuth | undefined {
   }
   const cookieToken = parseCookies(req)[WEB_SESSION_COOKIE];
   if (cookieToken === undefined) return undefined;
-  const user = verifyWebSession(cookieToken);
-  return { actor: { type: 'human', id: user.id, name: user.name }, user, cookieToken };
+  try {
+    const user = verifyWebSession(cookieToken);
+    return { actor: { type: 'human', id: user.id, name: user.name }, user, cookieToken };
+  } catch (error) {
+    // 会话无效/过期/闲置 = 没有有效凭证 → 401 语义（红队 V9）；用户被禁用仍是 403
+    if (isSkyportError(error) && error.type === ERROR_CODES.PERMISSION_DENIED) {
+      throw createError(ERROR_CODES.AUTH_REQUIRED, error.message, { context: {} });
+    }
+    throw error;
+  }
 }
 
 /** 认证中间件：无凭证返回 401（AUTH_REQUIRED） */

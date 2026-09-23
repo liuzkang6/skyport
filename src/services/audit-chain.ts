@@ -80,9 +80,19 @@ function eventChainContent(row: {
   };
 }
 
+/** 递归键序规范化：键序无关、内容全保留（红队 V3 回归发现：数组 replacer 会剥掉嵌套内容） */
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonicalize(record[key])]));
+  }
+  return value;
+}
+
 /** 计算一条记录的链式哈希：SHA-256(前条哈希 + 本条内容) */
 export function computeChainHash(prevHash: string | null, content: Record<string, unknown>): string {
-  const canonical = JSON.stringify(content, Object.keys(content).sort());
+  const canonical = JSON.stringify(canonicalize(content));
   return createHash('sha256').update(`${prevHash ?? 'GENESIS'}|${canonical}`).digest('hex');
 }
 

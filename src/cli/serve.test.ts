@@ -155,14 +155,14 @@ describe('WebUI 会话与审批（spec/webui）', () => {
     expect(ghost.body.error).toBe('用户名或密码错误'); // 与密码错误同文案（防枚举）
 
     const anonymous = await fetchWeb('/api/v1/auth/me');
-    expect(anonymous.status).toBe(403);
+    expect(anonymous.status).toBe(401); // 无凭证 = 401（红队 V9）
 
     const login = await loginWeb('web-ops', 'password8');
     const cookie = cookieOf(login);
     const logout = await fetchWeb('/api/v1/auth/logout', { method: 'POST', cookie });
     expect(logout.status).toBe(200);
     const after = await fetchWeb('/api/v1/auth/me', { cookie });
-    expect(after.status).toBe(403);
+    expect(after.status).toBe(401); // 会话已吊销 = 未认证（红队 V9）
   });
 
   it('连续失败 5 次 → 429 + Retry-After（锁定中正确密码也拒绝）', async () => {
@@ -259,8 +259,10 @@ describe('WebUI 会话与审批（spec/webui）', () => {
 // ── 读侧范围（红队 V5）：agent 令牌只见范围内的资产与行动 ──
 
 describe('REST 读侧资产范围（红队 V5）', () => {
+  let scopedSeq = 0;
   function scopedSession(patterns: string[]): string {
-    const issued = createAgent({ name: `scoped-${patterns.join('-')}`, assetPatterns: patterns, riskCeiling: 'low', autoExecLow: false });
+    scopedSeq += 1;
+    const issued = createAgent({ name: `scoped-${scopedSeq}-${patterns.join('_')}`, assetPatterns: patterns, riskCeiling: 'low', autoExecLow: false });
     return loginWithRefreshToken(issueRefreshToken(issued.agent.id)).token;
   }
 

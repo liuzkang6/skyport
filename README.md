@@ -35,7 +35,7 @@ pnpm dev asset check web-01   # TCP 连通性检查
 
 部署：克隆后 `pnpm install && pnpm build`，把 `bin/skyport.mjs` 软链或包装到 PATH（内含 node≥20 版本守卫，优先走 dist 产物）。CI（`.github/workflows/ci.yml`）在 node 20/22 矩阵跑 verify，并冒烟 node18 下的人话报错。数据备份：`skyport backup`（默认 `~/.skyport/backups`，保留份数 `SKYPORT_BACKUP_KEEP` 可配，自定义目录不动权限）。
 
-CLI 子命令（`skyport <命令>`）：`init`、`list`（资产清单，`--select` 交互下钻）、`asset add / import / list / show / check / remove`、`agent create / list / show / pause / activate / revoke / run`（AI 一站式，key 可用 `--api-key-file` 读文件）、`action create / list / show`（台账支持 `--status/--agent/--target/--since/--limit/--offset` 过滤分页）、`approve <id...> / reject <id...>`（可批量）、`cancel`、`run`（人自用直通）、`watch`（前台值守，终端内可就地 y/n 审批，`--once` 单次巡检）、`user add / list`（Web 用户与角色四分）、`serve`、`config`、`doctor`。查询类命令带 `--json` 输出机器可读格式。
+CLI 子命令（`skyport <命令>`）：`init`、`list`（资产清单，`--select` 交互下钻）、`asset add / import / list / show / check / remove`、`agent create / list / show / pause / activate / revoke / run`（AI 一站式，key 可用 `--api-key-file` 读文件）、`agent login / rotate`（凭证三层：skr_ 换 sks_ 会话令牌 / 手动轮换，令牌只认文件或 stdin）、`action create / list / show`（create 支持 `--rollback` 回滚声明与 `--dry-run` 预演；台账支持 `--status/--agent/--target/--since/--limit/--offset` 过滤分页）、`approve <id...> / reject <id...>`（可批量）、`cancel`、`run`（人自用直通）、`watch`（前台值守，终端内可就地 y/n 审批，`--once` 单次巡检）、`audit verify / backfill`（审计链校验 / 存量补链）、`user add / list / disable / enable / remove`（Web 用户与角色四分）、`serve`（REST + WebUI）、`mcp`（stdio 适配器，令牌经 SKYPORT_API_KEY 与 REST 同源校验）、`config`、`doctor`。查询类命令带 `--json` 输出机器可读格式。REST 读端点对 agent 令牌按其资产范围过滤（与 CLI 三件套一致）。
 
 ## WebUI（v0.7 第一刀，spec/webui）
 

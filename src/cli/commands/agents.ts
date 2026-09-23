@@ -12,6 +12,7 @@ import {
   resolveActor,
   setAgentStatus,
 } from '../../services/agents';
+import { loginWithRefreshToken, rotateRefreshToken } from '../../services/credentials';
 import { agentRun } from '../../services/actions';
 import { RISK_LEVELS, type RiskLevel } from '../../services/risk';
 import { executionFailureOf } from './actions';
@@ -112,6 +113,36 @@ export function buildAgentCommand(): Command {
       process.stdout.write(`已吊销 ${updated.name}（不可恢复；如需再授权请新建 agent）\n`);
     });
 
+  // 凭证三层 CLI 入口（spec/agent-credentials；manual-test §9）：skr_ 换 sks_ / 手动轮换。
+  // 刷新令牌不上 argv（红队 S11 同款教训）：只认文件或 stdin。
+  const login = agent.command('login').description('用刷新令牌（skr_）换取会话令牌（sks_，30 分钟）');
+  login
+    .requiredOption('--refresh-token-file <path>', '刷新令牌文件路径（="-" 读 stdin；令牌不上 argv）')
+    .option('--json', '机器可读输出')
+    .action(async (options: { refreshTokenFile: string; json?: boolean | undefined }) => {
+      const raw = options.refreshTokenFile === '-'
+        ? (await readStdin()).trim()
+        : (await readFileUtf8(options.refreshTokenFile)).trim();
+      if (raw.length === 0) throw new Error('刷新令牌为空');
+      const session = loginWithRefreshToken(raw);
+      if (options.json === true) printJson(session);
+      else {
+        process.stdout.write([
+          `会话令牌（${session.agentName}，${session.expiresAt} 前有效，只显示这一次）：`,
+          session.token,
+          '',
+        ].join('\n'));
+      }
+    });
+
+  agent
+    .command('rotate <target>')
+    .description('手动轮换刷新令牌（旧 skr_ 立即失效；target 为 agent 名或 ID）')
+    .action((target: string) => {
+      const rotated = rotateRefreshToken(target);
+      process.stdout.write(`新刷新令牌（${rotated.agentName}，只显示这一次，旧令牌已失效）：\n${rotated.token}\n`);
+    });
+
   const run = agent.command('run').description('AI 一站式：创建行动 → 等审批/自动执行 → 返回结果');
   run
     .requiredOption('--exec <command>', '要执行的命令（引号内空格会保留）')
@@ -169,4 +200,13 @@ async function resolveApiKey(options: RunOptions): Promise<string | undefined> {
     return fromFile;
   }
   return getConfig().apiKey;
+}
+
+/** 读 stdin 到末尾（agent login 从管道收刷新令牌用） */
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }

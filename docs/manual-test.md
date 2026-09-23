@@ -1,7 +1,8 @@
 # skyport 手动验证清单（v0.3.x 网关完工线·当前进度）
 
-> 给人的验证步骤。按顺序跑，每步写明预期。当前版本包含：工程化小批、审计链、高危护栏、CMDB v2、保险箱。
-> 凭证三层 / REST API / MCP 适配器尚未实现，待后续版本。
+> 给人的验证步骤。按顺序跑，每步写明预期。当前版本包含：工程化小批、审计链、高危护栏、CMDB v2。
+> 已接入口：serve（REST）/ mcp / agent login / agent rotate / user 管理 / audit verify+backfill。
+> **尚未接入口（服务层已就绪、CLI 未接）**：凭证保险箱（§6 `skyport secret`）、CMDB 写路径（§5 `skyport service`）。
 
 ## 前置条件
 
@@ -120,11 +121,11 @@ skyport run --exec 'node -e "require(\"child_process\").spawn(\"sleep\",[\"60\"]
 
 ```bash
 skyport agent create --name cred-test --assets '*' --risk-ceiling medium
-# 记下输出的 skr_ 令牌
-skyport agent login --refresh-token-file <(echo 'skr_...')
-# 输出 sks_ 会话令牌（30 分钟有效）
+# 记下输出的 skr_ 令牌（agent create 不再直接发 skr_ 时，先 rotate 一次拿 skr_）
 skyport agent rotate cred-test
-# 输出新的 skr_，旧的立即失效
+# 输出新的 skr_（只显示一次），旧的立即失效
+skyport agent login --refresh-token-file <(echo 'skr_...')
+# 输出 sks_ 会话令牌（30 分钟有效；令牌只认文件/stdin，不上 argv）
 ```
 
 ## 10. REST API v1
@@ -144,32 +145,37 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/assets
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/audit/verify
 # 预期：{"ok":true,"checked":N}
 
-curl http://127.0.0.1:7100/api/v1/assets
-# 预期：403（无令牌）
+curl -w '%{http_code}\n' http://127.0.0.1:7100/api/v1/assets
+# 预期：401（无凭证；403 留给"认证了但无权"，红队 V9）
 ```
 
 ## 11. MCP 适配器
 
 ```bash
-skyport mcp  # stdio 模式启动
+# 红队 V6：MCP 与 REST 同源校验——无令牌直接拒绝启动（SKYPORT_AUTH_REQUIRED）
+SKYPORT_API_KEY=sks_... skyport mcp  # stdio 模式启动（令牌经环境变量，不上 argv）
 # 在另一个终端发 JSON-RPC：
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | skyport mcp
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | SKYPORT_API_KEY=sks_... skyport mcp
 # 预期：返回 serverInfo
-echo '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | skyport mcp
-# 预期：返回 7 个工具
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | SKYPORT_API_KEY=sks_... skyport mcp
+# 预期：返回 7 个工具（纯只读；agent 令牌读面按其资产范围过滤，与 REST 一致）
 ```
 
 ## 12. 告警总线
 
 ```bash
 skyport serve --port 7100 &
-TOKEN="sks_..."
+# 红队 V7：alerts:write 只属于 Web 会话角色（approver/admin）——Bearer agent 令牌投递告警 → 403。
+# 先拿 Web 会话 cookie：
+curl -c /tmp/skp.jar -X POST -H "Content-Type: application/json" \
+  -d '{"username":"<approver用户>","password":"<密码>"}' \
+  http://127.0.0.1:7100/api/v1/auth/login
 
-# Alertmanager 格式
-curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+# Alertmanager 格式（带 Web 会话 cookie）
+curl -b /tmp/skp.jar -X POST -H "Content-Type: application/json" \
   -d '{"alerts":[{"labels":{"alertname":"HighDisk","instance":"t1","severity":"critical"},"annotations":{"summary":"Disk 91%"}}]}' \
   http://127.0.0.1:7100/api/v1/alerts
-# 预期：201 + 告警创建
+# 预期：201 + 告警创建（用 Bearer sks_/skp_ 调用则 403）
 
 # 查看告警
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/alerts?status=open

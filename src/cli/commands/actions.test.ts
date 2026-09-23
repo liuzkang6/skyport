@@ -1,7 +1,28 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Command } from 'commander';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { closeDb, getDb } from '../../adapters/db';
+import { resetConfigCache } from '../../config/config';
 import { createError, ERROR_CODES, isSkyportError } from '../../errors/errors';
 import type { ActionResult } from '../../services/actions';
-import { buildBatchError, executionFailureOf } from './actions';
+import { buildActionCommand, buildBatchError, executionFailureOf } from './actions';
+
+let tempDir: string;
+
+beforeEach(async () => {
+  tempDir = await mkdtemp(join(tmpdir(), 'skyport-cli-actions-'));
+  process.env.SKYPORT_DB_PATH = join(tempDir, 'skyport.db');
+  resetConfigCache();
+});
+
+afterEach(async () => {
+  closeDb();
+  delete process.env.SKYPORT_DB_PATH;
+  resetConfigCache();
+  await rm(tempDir, { recursive: true, force: true });
+});
 
 function resultWithStatus(status: string): ActionResult {
   return {
@@ -70,5 +91,33 @@ describe('CLI 退出码契约（红队 S7/S8）', () => {
     expect(isSkyportError(execError)).toBe(true);
     if (isSkyportError(execError)) expect(execError.type).toBe('SKYPORT_EXEC_NON_ZERO');
     expect(buildBatchError([], 0, 3)).toBeUndefined();
+  });
+});
+
+
+// ── 红队 V4：护栏旗标 CLI 接线（--rollback / --dry-run）──
+
+describe('action create 护栏旗标（spec/guardrails）', () => {
+  async function runCreate(args: string[]): Promise<unknown> {
+    const prog = new Command().exitOverride(); // 测试内不真退出
+    prog.addCommand(buildActionCommand());
+    return prog.parseAsync(['node', 'skyport', 'action', ...args]);
+  }
+
+  it('high 无 --rollback → 拒绝（域码 ACTION_INVALID）；带 --rollback → 登记 pending', async () => {
+    await expect(runCreate(['create', '--exec', 'shutdown now'])).rejects.toThrowError();
+    const rows = getDb().prepare('SELECT COUNT(*) AS n FROM actions').get() as { n: number };
+    expect(rows.n).toBe(0);
+
+    await runCreate(['create', '--exec', 'shutdown now', '--rollback', '重启机器即可']);
+    const saved = getDb().prepare('SELECT rollback, status FROM actions').get() as { rollback: string; status: string };
+    expect(saved.rollback).toBe('重启机器即可');
+    expect(saved.status).toBe('pending');
+  });
+
+  it('--dry-run：只评级不落库（high 也无需 rollback）', async () => {
+    await runCreate(['create', '--exec', 'shutdown now', '--dry-run']);
+    const rows = getDb().prepare('SELECT COUNT(*) AS n FROM actions').get() as { n: number };
+    expect(rows.n).toBe(0);
   });
 });

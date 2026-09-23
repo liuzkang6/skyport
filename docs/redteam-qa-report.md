@@ -5,6 +5,8 @@
 > **⚠ 状态更新（2026-09-22 第二轮回归）**：第一轮全部 S1–S15 / U1–U8 已由开发侧修复并经黑盒复测确认（证据见[第七节](#七第二轮回归验证2026-09-22-修复后构建)）；当前遗留为新发现 **N1（`--json` 管道输出 64KiB 截断）**、**N2（远程执行引号剥离变形）** 及 3 条残留判级备注。
 >
 > **⚠ 状态更新（2026-09-23 v0.3/v0.4 功能审查）**：N1/N2 已修复（有回归测试）；新增 v0.3/v0.4 功能审查见[第八节](#八v03v04-功能审查2026-09-23非破坏性)——**阻断 V1（verify 红）**、**V2（REST 参数路由全 404）**、**V3（审计链惰性）**、**V4（--rollback/--dry-run 未接线）**、严重 V5（REST 读无范围）及暗代码可达性矩阵。
+>
+> **⚠ 状态更新（2026-09-23 第三轮修复）**：V1/V2 已由后续开发提交修复（c7dd172 起 verify 回绿、路由下标 `[4]`）；本轮修复 **V3（审计链接线 + 修 computeChainHash 嵌套内容不进哈希的潜在缺陷 + backfill）**、**V4**、**V5**、**V6**、**V7**、**V8**、**V9**，并接通 `skyport mcp` / `agent login` / `agent rotate` 入口——明细见[第九节](#九第三轮修复记录2026-09-23)。暗代码剩余（vault / CMDB 写路径 / breakglass / 互斥 / 异步执行）见 8.1 矩阵，manual-test.md 已如实标注。
 > **被测版本**：skyport v0.1.0（M3），仓库 `/home/liu/skyport`，DB `~/.skyport/skyport.db`。
 > **测试日期**：2026-09-22。测试依据：`docs/redteam-test-plan.md` 全部用例（A–G）+ 攻击者模式扩展 + 值守运维人机体验专项。
 > **测试环境说明**：本机默认 node 为 v18.19.1，CLI 无法启动（见 S1），全部测试使用 `~/node22/bin/node`（v22.14.0）经 `bin/skyport.mjs` 执行。
@@ -477,3 +479,30 @@ A1/A3/A5/A6、B1/B3/B4、D2、E1、E2（本地注入）、F1 全部保持通过�
 1. **V1**（门禁回绿）→ **V2**（REST 参数路由，一处 `[3]→[4]` 级修复 + 补测试）→ **V4**（--rollback/--dry-run 接线）→ **V3**（审计链写入接线，安全宣称生效）
 2. **V5**（REST 读范围）；**V8**（user 生命周期）
 3. 暗代码功能逐个接入口（serve/mcp 入 CLI、vault/credentials/CMDB 写路径/breakglass/互斥/异步），并同步 manual-test.md 重写
+
+---
+
+## 九、第三轮修复记录（2026-09-23）
+
+> 范围：第八节 V1–V9 中当时仍未解决的条目。V1（verify 红）与 V2（路由下标）已在 `c7dd172` 由开发侧修复，本轮复核确认；其余为本轮交付。门禁：`pnpm verify` 全绿（35 文件 276 测试 + typecheck/lint/arch/build）。
+
+### 9.1 修复明细
+
+| ID | 状态 | 交付内容 |
+| --- | --- | --- |
+| V1 verify 红 | ✅（前序提交已修，本轮复核） | HEAD 上 verify 全绿 |
+| V2 参数路由 404 | ✅（前序提交已修，本轮复核） | 全部路径端点取 `[4]`；serve 测试覆盖参数端点 |
+| V3 审计链惰性 | ✅ 已修 | 生产事件/执行写入统一切换 `appendChained*`（含 `expired` 事件、截断标志）；`verify` 重算每条内容哈希 + gap 检测 + 如实报告未链化存量（空链报"空链"而非"完整"）；新增 `audit backfill` 幂等补链。**回归另发现**：`computeChainHash` 的数组 replacer 会剥掉嵌套内容（detail 从不进哈希），已改递归规范化并补篡改 detail 的测试 |
+| V4 护栏自锁 | ✅ 已修 | `action create --rollback/--dry-run`、`run --rollback`、`agent run --rollback` 全接线；dry-run 专用渲染（不引导 approve）；CLI 层测试 |
+| V5 REST 读无范围 | ✅ 已修 | assets 列表/详情、actions 列表（SQL GLOB 语义与 globMatch 严格一致，分页不破坏）、action 详情、context 包、services（按资产关联过滤）全部按 agent 资产范围过滤/拒绝；测试覆盖 |
+| V6 MCP 无鉴权 | ✅ 已修 | `skyport mcp` 入 CLI；启动强制令牌（SKYPORT_API_KEY，与 REST 同源校验），无令牌/坏令牌拒绝启动；工具调用无认证 → 拒绝；agent 读面按资产范围过滤 |
+| V7 alerts 旁路 | ✅ 已修 | `POST /alerts` 对所有主体要求 `alerts:write` 能力（仅 Web 会话 approver/admin）；Bearer agent → 403，测试坐实 |
+| V8 user 生命周期 | ✅ 已修 | `user disable/enable/remove`（停用即吊销全部会话）；非 TTY 密码缺失 → `SKYPORT_CONFIG_INVALID` 人话报错（exit 3），退出码域新增 user=12 |
+| V9 杂项 | ✅ 已修 | 无凭证 → **401**（新错误码 `SKYPORT_AUTH_REQUIRED`；无效/过期 cookie 同 401，禁用仍 403）；`/health` 版本改读 package.json；未知命令实测已有明确提示（不复现）；manual-test.md 头部与 §9–§12 重写同步实现 |
+
+### 9.2 遗留与移交
+
+- **存量数据补链**：`~/.skyport/skyport.db` 的历史事件/执行记录（本轮审查时 545+ 条）未链化——`audit verify` 会如实计数并提示；因当时有 `serve` 进程在写库，**未在线上执行 backfill**，建议静默窗口运行 `skyport audit backfill` 一次。
+- **暗代码接入口**（vault / CMDB 写路径 / breakglass / 互斥认领 / 异步执行 / 三层令牌 REST 签发）：服务层与测试在，入口仍缺，见 8.1 矩阵；manual-test.md 已标注"尚未接入口"。
+- **新观察（移交开发）**：并行开发新增的 `POST /api/v1/heartbeat` 与 `GET /api/v1/events/stream`（SSE）当前**无认证**——heartbeat 可被任意来源写入指标点、SSE 将来接真实事件推送时若不加认证会绕过 V5 的读范围。建议按同一套 actor 解析补门禁（有真机心跳集成在跑，改前先协调）。
+- guardrails spec 第 2 条"approve high 强确认（键入完整 ID / --force）"仍未实现（本轮未列入 V4 修复范围）。

@@ -97,10 +97,10 @@ describe('MCP 适配器', () => {
   });
 
   it('tools/call 未知工具 → 错误响应', () => {
-    const res = handleRequestForTest({
-      jsonrpc: '2.0', id: 5, method: 'tools/call',
-      params: { name: 'nonexistent', arguments: {} },
-    });
+    const res = handleRequestForTest(
+      { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'nonexistent', arguments: {} } },
+      humanActor(),
+    );
     expect(res.error).toBeDefined();
     expect(res.error?.message).toContain('Unknown tool');
   });

@@ -7,8 +7,8 @@ import { resetConfigCache } from '../config/config';
 import { isSkyportError } from '../errors/errors';
 import type { UserRole } from './users';
 import {
-  can, createUser, issueWebSession, listUsers, ROLE_CAPABILITIES,
-  revokeWebSession, verifyLogin, verifyWebSession,
+  can, createUser, issueWebSession, listUsers, removeUser, revokeWebSession,
+  setUserStatus, verifyLogin, verifyWebSession, ROLE_CAPABILITIES,
 } from './users';
 
 let tempDir: string;
@@ -166,6 +166,45 @@ describe('Web 会话（skw_）', () => {
     } catch (e) {
       expect(isSkyportError(e)).toBe(true);
       if (isSkyportError(e)) expect(e.type).toBe('SKYPORT_PERMISSION_DENIED');
+    }
+  });
+
+  it('停用：立即吊销现有会话，登录被拒（USER_DISABLED）；enable 恢复（红队 V8）', () => {
+    createUser('bye-user', 'password8', 'viewer');
+    const session = issueWebSession(verifyLogin('bye-user', 'password8'));
+    expect(verifyWebSession(session.token).name).toBe('bye-user');
+
+    const disabled = setUserStatus('bye-user', 'disabled');
+    expect(disabled.status).toBe('disabled');
+    // 停用即吊销会话
+    expect(() => verifyWebSession(session.token)).toThrowError();
+    // 登录也进不来
+    try {
+      verifyLogin('bye-user', 'password8');
+      expect.unreachable('停用用户不应能登录');
+    } catch (error) {
+      expect(isSkyportError(error) && error.type === 'SKYPORT_USER_DISABLED').toBe(true);
+    }
+
+    const enabled = setUserStatus('bye-user', 'active');
+    expect(enabled.status).toBe('active');
+    expect(verifyLogin('bye-user', 'password8').name).toBe('bye-user');
+  });
+
+  it('删除：用户与会话一并清除；不存在 → USER_NOT_FOUND（红队 V8）', () => {
+    createUser('tmp-user', 'password8', 'operator');
+    const session = issueWebSession(verifyLogin('tmp-user', 'password8'));
+    const removed = removeUser('tmp-user');
+    expect(removed.name).toBe('tmp-user');
+    expect(listUsers().some((u) => u.name === 'tmp-user')).toBe(false);
+    expect(() => verifyWebSession(session.token)).toThrowError();
+    expect(() => verifyLogin('tmp-user', 'password8')).toThrowError();
+
+    try {
+      removeUser('tmp-user');
+      expect.unreachable('已删用户再删应报错');
+    } catch (error) {
+      expect(isSkyportError(error) && error.type === 'SKYPORT_USER_NOT_FOUND').toBe(true);
     }
   });
 

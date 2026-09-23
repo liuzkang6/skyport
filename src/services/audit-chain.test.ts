@@ -7,10 +7,12 @@ import { resetConfigCache } from '../config/config';
 import {
   appendChainedEvent,
   appendChainedExecution,
+  backfillAuditChain,
   computeChainHash,
   isActionEventType,
   verifyAuditChain,
 } from './audit-chain';
+import { createAction } from './actions';
 
 let tempDir: string;
 
@@ -85,9 +87,52 @@ describe('审计链防篡改（spec/audit-chain）', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('篡改检测：改一条事件内容（不动 hash 列）后 verify 报内容哈希不匹配', () => {
+    seedAction('act_d');
+    appendChainedEvent('act_d', 'created', 'agent', 'agt_1', { risk: 'low' });
+    appendChainedEvent('act_d', 'approved', 'human', 'liu');
+    getDb().prepare("UPDATE action_events SET detail = '{\"risk\":\"high\"}' WHERE event = 'created'").run();
+    const result = verifyAuditChain();
+    expect(result.ok).toBe(false);
+    expect(result.firstViolation?.reason).toContain('篡改');
+  });
+
   it('空表 verify：输出无记录可校验', () => {
     const result = verifyAuditChain();
     expect(result.ok).toBe(true);
     expect(result.checked).toBe(0);
+    expect(result.unchained).toBe(0);
+  });
+
+  it('生产写入走链化（红队 V3）：createAction 产生的事件带 seq/hash', async () => {
+    const created = await createAction({ command: 'echo chain-wiring', actor: { type: 'human', id: 'tester', name: 'tester' } });
+    const row = getDb()
+      .prepare('SELECT seq, prev_hash, hash FROM action_events WHERE action_id = ? ORDER BY id DESC LIMIT 1')
+      .get(created.action.id) as { seq: number; prev_hash: string | null; hash: string | null };
+    expect(row.seq).toBeGreaterThan(0);
+    expect(row.hash).toHaveLength(64);
+    expect(verifyAuditChain().unchained).toBe(0);
+  });
+
+  it('未链化存量如实计数；backfill 补链后 verify 全绿（红队 V3）', () => {
+    seedAction('act_e');
+    // 模拟 v0.3 时代的无链写入
+    getDb()
+      .prepare("INSERT INTO action_events (action_id, event, actor_type, actor_id, detail, created_at) VALUES ('act_e', 'created', 'agent', 'agt_1', NULL, ?)")
+      .run(new Date().toISOString());
+    const before = verifyAuditChain();
+    expect(before.ok).toBe(true);
+    expect(before.unchained).toBe(1);
+    expect(before.checked).toBe(0);
+
+    const backfill = backfillAuditChain();
+    expect(backfill.chainedEvents).toBe(1);
+    const after = verifyAuditChain();
+    expect(after.ok).toBe(true);
+    expect(after.checked).toBe(1);
+    expect(after.unchained).toBe(0);
+
+    // 幂等：再跑一次无新增
+    expect(backfillAuditChain().chainedEvents).toBe(0);
   });
 });
