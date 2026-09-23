@@ -275,5 +275,53 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 12,
+    up: (db) => {
+      // Token 用量治理（PRD §2）+ 插件体系 + 基线数据模型
+      db.exec(`
+        CREATE TABLE usage_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+          model TEXT NOT NULL,
+          prompt_tokens INTEGER NOT NULL DEFAULT 0,
+          completion_tokens INTEGER NOT NULL DEFAULT 0,
+          cost_usd REAL NOT NULL DEFAULT 0,
+          action_id TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_usage_agent ON usage_events(agent_id);
+        CREATE INDEX idx_usage_created ON usage_events(created_at);
+        CREATE TABLE plugins (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          version TEXT NOT NULL,
+          description TEXT,
+          capabilities TEXT NOT NULL DEFAULT '[]',
+          enabled INTEGER NOT NULL DEFAULT 0,
+          source TEXT NOT NULL DEFAULT 'local',
+          installed_at TEXT NOT NULL
+        );
+        CREATE TABLE metric_points (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+          metric TEXT NOT NULL,
+          value REAL NOT NULL,
+          timestamp TEXT NOT NULL
+        );
+        CREATE INDEX idx_metrics_asset_metric ON metric_points(asset_id, metric, timestamp);
+        CREATE TABLE baselines (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+          metric TEXT NOT NULL,
+          p50 REAL NOT NULL,
+          p95 REAL NOT NULL,
+          sample_count INTEGER NOT NULL,
+          computed_at TEXT NOT NULL,
+          UNIQUE(asset_id, metric)
+        );
+      `);
+    },
+  },
 ];
 

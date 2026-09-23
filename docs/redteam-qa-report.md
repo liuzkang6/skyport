@@ -3,6 +3,8 @@
 > **交付对象**：开发 Agent / 开发同学。本文档自包含，可直接按问题 ID 逐条修复。
 >
 > **⚠ 状态更新（2026-09-22 第二轮回归）**：第一轮全部 S1–S15 / U1–U8 已由开发侧修复并经黑盒复测确认（证据见[第七节](#七第二轮回归验证2026-09-22-修复后构建)）；当前遗留为新发现 **N1（`--json` 管道输出 64KiB 截断）**、**N2（远程执行引号剥离变形）** 及 3 条残留判级备注。
+>
+> **⚠ 状态更新（2026-09-23 v0.3/v0.4 功能审查）**：N1/N2 已修复（有回归测试）；新增 v0.3/v0.4 功能审查见[第八节](#八v03v04-功能审查2026-09-23非破坏性)——**阻断 V1（verify 红）**、**V2（REST 参数路由全 404）**、**V3（审计链惰性）**、**V4（--rollback/--dry-run 未接线）**、严重 V5（REST 读无范围）及暗代码可达性矩阵。
 > **被测版本**：skyport v0.1.0（M3），仓库 `/home/liu/skyport`，DB `~/.skyport/skyport.db`。
 > **测试日期**：2026-09-22。测试依据：`docs/redteam-test-plan.md` 全部用例（A–G）+ 攻击者模式扩展 + 值守运维人机体验专项。
 > **测试环境说明**：本机默认 node 为 v18.19.1，CLI 无法启动（见 S1），全部测试使用 `~/node22/bin/node`（v22.14.0）经 `bin/skyport.mjs` 执行。
@@ -361,3 +363,117 @@
 ### 7.4 基线回归结果
 
 A1/A3/A5/A6、B1/B3/B4、D2、E1、E2（本地注入）、F1 全部保持通过，退出码与第一轮一致；doctor 五项（新增 policy 检查）全绿。第一轮修复未破坏任何已通过行为。
+
+---
+
+## 八、v0.3/v0.4 功能审查（2026-09-23，非破坏性）
+
+> 范围：`040c695`…`a5a47c0` 共 45 个新提交（审计链/护栏/CMDB/保险箱/三层令牌/REST API/MCP/异步执行/告警总线/互斥认领/态势包/Break-glass/四角色）。约束：全程非破坏性（唯一一次审计行篡改已快照并精确还原）。
+> 结论先行：**服务层代码与测试质量不差，但大量功能是"暗代码"——没有 CLI/REST 入口，用户不可达**；可达的部分里，REST 全部带路径参数的端点因取段 bug 整体 404，审计链防篡改未接线（惰性）。**`pnpm verify` 在 HEAD 上是红的**。
+
+### 8.1 交付状态矩阵（可达性盘点）
+
+| 功能 | 服务层+测试 | 用户入口 | 实际可用性 |
+| --- | --- | --- | --- |
+| 审计链防篡改 | ✅ | CLI `audit verify` | **❌ 惰性**（见 V3） |
+| 高危护栏 | ✅ | CLI `action create` | **半残**（见 V4） |
+| 备份 backup | ✅ | CLI `backup` | ✅ 正常（0600/0700 权限正确） |
+| 四角色用户 | ✅ | CLI `user add/list` + REST auth | ✅ 基本可用（见 V9/V10） |
+| REST API v1 | ✅ | **无 CLI 命令**（`skyport serve` 不存在） | 经 tsx 直启后：列表端点可用，**全部带参数端点 404**（V2） |
+| MCP 适配器 | ✅ | **无 CLI 命令**（`skyport mcp` 不存在） | 经 tsx 直启后：7 工具协议正常（V7） |
+| 凭证保险箱 | ✅ | **无任何入口** | ❌ 暗代码（manual-test 的 `skyport secret` 不存在） |
+| 三层令牌（skr_/sks_） | ✅ | **无签发入口**（REST 只验证不签发） | ❌ 暗代码 |
+| 告警总线 | ✅ | REST POST/GET（列表路由可用） | 部分可用（ingest/stats ✓，**ack/close 走参数路由 → 404**） |
+| CMDB v2 | ✅ | **写路径无入口**（REST 仅 GET /services） | ❌ 暗代码（无法登记服务/依赖） |
+| 态势包 | ✅ | REST /context/:asset | ❌ 404（V2） |
+| 资产执行互斥+认领 | ✅ | **未接线**（无生产调用点） | ❌ 暗代码 |
+| 异步执行 approveAsync | ✅ | **未接线** | ❌ 暗代码 |
+| Break-glass | ✅ | **无入口** | ❌ 暗代码（未做实机验证——封存真实 SSH 密钥有风险，仅代码审阅） |
+
+`docs/manual-test.md` 第 9–12 节的 `skyport serve` / `skyport mcp` / `skyport secret set` / `skyport agent login` 命令**均不存在**，文档与实现脱节。
+
+### 8.2 问题清单
+
+#### V1〔阻断〕`pnpm verify` 在 HEAD 红——最新提交未过自家门禁
+
+- **场景**：`pnpm verify`（AGENTS.md 要求提交前必跑）
+- **期望**：typecheck + lint + arch + test + build 全绿
+- **实际**：typecheck 即失败：`users.ts(24) TS2322`（真实类型错误）、`serve.ts(19) TS6133`、`static.ts(24) TS6133`（未用变量）；单测另有 1 败（serve whoami 响应结构漂移：测试期望扁平、实现返回 `{actor:{...}}` 包裹层）
+- **复现步骤**：`pnpm verify` → 看 tsc 输出
+- **修复建议**：修 3 处 TS 错误 + 同步 whoami 测试；CI/钩子把 verify 挂回提交门禁
+
+#### V2〔阻断〕REST 全部带路径参数端点取错 URL 段，真实 ID 也 404
+
+- **场景**：`GET /api/v1/assets/t1`、`GET /api/v1/actions/<真实ID>`、`POST /api/v1/actions/<ID>/approve`、`PATCH /api/v1/alerts/<ID>/ack|close`、`GET /api/v1/context/t1(/summary)`
+- **期望**：按参数定位资源
+- **实际**：`/api/v1/assets/t1`.split('/') = `['','api','v1','assets','t1']`，代码取 `[3]` = `'assets'`（资源名），应为 `[4]`。**实测真实存在的 t1 与真实行动 ID 均 404 ASSET/ACTION_NOT_FOUND**；approver 经 Web 会话审批真实 pending → 404。manual-test 第 10/12 节全部流程走不通
+- **复现步骤**：1. 起 serve 2. 带合法令牌 `curl /api/v1/assets/t1` → 404 3. 对照列表端点确认 t1 存在
+- **修复建议**：统一改为 `[4]`（或先剥 `/api/v1` 前缀再取段）；补路径参数端点的 E2E 测试（现有 6 条 serve 测试全部只测列表/无参端点，所以没抓到）
+
+#### V3〔严重〕审计链防篡改惰性：哈希从未写入，篡改实测不可检测
+
+- **场景**：`skyport audit verify`；以及对 action_events 的单行篡改（已快照还原）
+- **期望**：H1a 链完整报 N 条；H1c 篡改 detail 后报 hash 不匹配
+- **实际**：库里 545 条事件 `hash/seq` 全为 NULL；新产生的行动事件同样无链字段；verify 只查 `WHERE seq IS NOT NULL` → 永远"**审计链完整（0 条记录校验通过）**"。实测篡改最后一条事件 detail 后 verify 仍报完整 exit 0——**防篡改宣称与实现脱节**。根因：`appendChainedEvent/appendChainedExecution`（audit-chain.ts:40/58）是死代码，生产写入端（action-exec.ts:241、actions.ts:318）仍用无链字段的普通 INSERT
+- **复现步骤**：1. `skyport run --exec 'echo x'` 2. `skyport audit verify` → "0 条" 3. 查库 `select count(*) from action_events where hash is not null` → 0
+- **修复建议**：生产事件/执行写入统一切换到 appendChained* 函数；对存量行做一次回填链化（或 verify 明确报告"存量 N 条未链化"）；0 条时文案改"链未启用/空链"而非"完整"
+
+#### V4〔严重〕高危护栏自锁：`--rollback`/`--dry-run` 旗标不存在
+
+- **场景**：`skyport action create --exec 'shutdown now'`（无 rollback → 拒绝 ✓）；`--exec 'shutdown now' --rollback '重启即可'` → `error: unknown option '--rollback'`；`--dry-run` 同样不存在
+- **期望**：manual-test 4a/4b 流程可走通：提供回滚声明的 high 行动能登记；dry-run 评级不落库
+- **实际**：护栏服务存在且门口拒绝生效（exit 11，上下文含 risk high），但**没有任何途径合法登记 high 风险行动**——护栏变成了全面禁令；dry-run 也不可用
+- **复现步骤**：`skyport action create --exec 'shutdown now' --rollback 'x'` → unknown option
+- **修复建议**：action create 接入 `--rollback <text>` 与 `--dry-run` 旗标；补 CLI 层测试
+
+#### V5〔严重〕REST 读端点无视 agent 资产范围（跨范围读取）
+
+- **场景**：assets=`t1*` 的 agent 用自己的 skp_ 令牌 `GET /api/v1/assets`、`GET /api/v1/actions?limit=5`
+- **期望**：与 CLI 一致的三件套约束（至少资产范围）
+- **实际**：返回 t1/t2/t3 全部资产；行动列表含 local/t3 等范围外目标记录（含其他目标的执行信息）。写端点（approve/ack）的能力门禁正确挡住了 agent，但**读侧完全无范围**——受限 agent 可枚举全部资产拓扑与历史行动
+- **复现步骤**：1. 建 `--assets 't1*'` agent 2. `curl -H "Authorization: Bearer skp_..." :7100/api/v1/assets` 3. 全量返回
+- **修复建议**：REST 读端点对 agent actor 应用 asset scope 过滤（与 CLI 同一套断言）；至少在 spec 里明示"REST 读=全量"是有意为之并记录
+
+#### V6〔一般〕MCP 适配器完全无鉴权，绕过 REST 认证层
+
+- **场景**：`startMcpServer()`（经 tsx 直启验证）
+- **期望**：MCP 客户端凭令牌访问；或明示信任模型
+- **实际**：initialize/tools/list/tools/call 正常（7 工具：list/get assets、list/get actions、list services、blast_radius、audit_verify——**纯只读，无审批工具 ✓**），但直连服务层，**零认证**——任何能拉起该进程的本地主体获得全部行动/资产读取权（含 stdout）。REST 层的 Bearer/角色体系对 MCP 完全不生效
+- **修复建议**：stdio 场景至少要求环境变量令牌（与 REST 同源校验）；文档明示信任边界=本地进程
+
+#### V7〔一般〕`POST /api/v1/alerts` 对 Bearer agent 跳过能力检查
+
+- **场景**：agent token 直接投递 Alertmanager 格式告警
+- **实际**：201 成功（Web 用户需 alerts:write 能力，Bearer agent 因 `user===undefined` 绕过该检查——serve.ts:251）。若是"推送集成"有意设计，需在 spec 写明；否则是能力门禁旁路
+- **修复建议**：明确定义 alerts:write 的主体集合；agent 投递应要求 scope
+
+#### V8〔一般〕user 生命周期缺失 + 新命令错误契约回退
+
+- **场景**：非 TTY 下 `skyport user add admin`；建错的用户想删除/停用
+- **实际**：① 报 `[skyport] 未知错误: 非 TTY 环境…` exit 1——第一轮 S8 修掉的"未知错误"包装在新代码里回归（应为人话+用法类退出码）；② `user` 组只有 add/list，**没有 remove/disable/pause**——用户一旦建错永远存在（mapErrorToStatus 里有 SKYPORT_USER_DISABLED，但无入口能触发它）
+- **修复建议**：补 user 停用/删除命令；错误统一走域码格式化
+
+#### V9〔建议〕杂项
+
+- 未知命令（如 `skyport users`/`skyport serve`）静默回退打印全局 help，无"unknown command"提示
+- `/api/v1/health` 硬编码 `"version":"0.3.0"`（与 package.json 0.1.0 也不一致）
+- 无凭证应为 401（当前 403，403 留给"认证了但无权"更符合语义）
+- serve 默认只听 127.0.0.1 ✓ 值得肯定；静态托管穿越防护（resolve 前缀校验+SPA 回退）正确 ✓
+- `docs/manual-test.md` 头部"尚未实现"清单与正文/勾选框/git log 三方矛盾，需重写
+
+### 8.3 通过项（值得保留的基线）
+
+- 登录爆破防护：连续 5 次错密码 → 第 6 次 **429 锁定**（Retry-After 机制就位）
+- Web 会话 cookie：`HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` ✓；登出吊销会话 ✓
+- 角色门禁顺序正确：approve/reject/ack/close 先验能力再取参数（所以 V2 的路由 bug 没有演变成越权）
+- viewer 无法审批（403）、agent 令牌无法审批（403）——**"审批只在人"红线在 REST 层守住**
+- 无令牌/伪造令牌 → 403（H6f/H6g ✓）
+- 告警三格式识别与 400 错误干净；pending 24h 过期护栏 ✓（approve 过期行动 → exit 11 自动作废）
+- 进程树击杀有测试且通过；N1 管道截断有回归测试且通过
+- backup 命令可用、备份文件 0600、目录 0700
+
+### 8.4 修复优先级建议
+
+1. **V1**（门禁回绿）→ **V2**（REST 参数路由，一处 `[3]→[4]` 级修复 + 补测试）→ **V4**（--rollback/--dry-run 接线）→ **V3**（审计链写入接线，安全宣称生效）
+2. **V5**（REST 读范围）；**V8**（user 生命周期）
+3. 暗代码功能逐个接入口（serve/mcp 入 CLI、vault/credentials/CMDB 写路径/breakglass/互斥/异步），并同步 manual-test.md 重写
