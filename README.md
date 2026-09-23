@@ -35,7 +35,25 @@ pnpm dev asset check web-01   # TCP 连通性检查
 
 部署：克隆后 `pnpm install && pnpm build`，把 `bin/skyport.mjs` 软链或包装到 PATH（内含 node≥20 版本守卫，优先走 dist 产物）。CI（`.github/workflows/ci.yml`）在 node 20/22 矩阵跑 verify，并冒烟 node18 下的人话报错。数据备份：`skyport backup`（默认 `~/.skyport/backups`，保留份数 `SKYPORT_BACKUP_KEEP` 可配，自定义目录不动权限）。
 
-CLI 子命令（`skyport <命令>`）：`init`、`list`（资产清单，`--select` 交互下钻）、`asset add / import / list / show / check / remove`、`agent create / list / show / pause / activate / revoke / run`（AI 一站式，key 可用 `--api-key-file` 读文件）、`action create / list / show`（台账支持 `--status/--agent/--target/--since/--limit/--offset` 过滤分页）、`approve <id...> / reject <id...>`（可批量）、`cancel`、`run`（人自用直通）、`watch`（前台值守，终端内可就地 y/n 审批，`--once` 单次巡检）、`config`、`doctor`。查询类命令带 `--json` 输出机器可读格式。
+CLI 子命令（`skyport <命令>`）：`init`、`list`（资产清单，`--select` 交互下钻）、`asset add / import / list / show / check / remove`、`agent create / list / show / pause / activate / revoke / run`（AI 一站式，key 可用 `--api-key-file` 读文件）、`action create / list / show`（台账支持 `--status/--agent/--target/--since/--limit/--offset` 过滤分页）、`approve <id...> / reject <id...>`（可批量）、`cancel`、`run`（人自用直通）、`watch`（前台值守，终端内可就地 y/n 审批，`--once` 单次巡检）、`user add / list`（Web 用户与角色四分）、`serve`、`config`、`doctor`。查询类命令带 `--json` 输出机器可读格式。
+
+## WebUI（v0.7 第一刀，spec/webui）
+
+浏览器治理入口：登录会话 + 角色四分 + 行动看板（列=治理状态机）+ 就地审批。
+
+```bash
+# 1) 建首个管理员（密码经 TTY 两次输入；脚本用 SKYPORT_USER_PASSWORD）
+skyport user add ops-admin --role admin
+# 2) 构建 WebUI 并启动服务（默认 127.0.0.1:7100，静态托管 webui/dist）
+cd webui && pnpm install && pnpm build && cd .. && skyport serve
+```
+
+浏览器打开 `http://127.0.0.1:7100/`：登录 → 看板七列（待审批/已放行/执行中/成功/失败/已否决/已取消）；
+approver/admin 可把"待审批"卡拖到"已放行/已否决"列或点开抽屉就地审批（拖到其他列会被状态机拒绝并回弹）。
+角色四分 viewer⊂operator⊂approver⊂admin：viewer 只读，operator 可创建行动，approver 可审批与告警处置，admin 另管用户。
+认证双轨：浏览器走会话 cookie（`skw_`，HttpOnly/SameSite=Strict，12h 有效/2h 闲置作废，失败 5 次锁 5 分钟）；
+API 消费方继续用 Bearer（sks_/skp_）。WebUI 代码在 `webui/`（独立 npm 项目），门禁 `cd webui && pnpm verify`；
+UI 只经 `/api/v1` 访问（AGENTS.md §10 分层铁律）。
 
 治理速览：AI 以 `--api-key`（或 `SKYPORT_API_KEY` / `--api-key-file`）发起行动 → 风险分级（低危且策略允许可自动执行；AI 自报风险只升不降）→ 中高危进 pending 等人（可配 `SKYPORT_NOTIFY_WEBHOOK_URL` 推送——载荷自动遮蔽命令中的密码/token；或 `skyport watch` 前台值守）→ `skyport approve <id>` 放行即执行 → 全程事件与执行留痕。执行契约：**超时默认不重试**（幂等命令可显式开 retryOnTimeout）、executions 如实记录总耗时/尝试次数/截断标志；**行动执行失败 CLI 退出码 4**，批量操作保留真实域码。风险策略放 **`~/.skyport/skyport.policy.json`**（数据目录 0700，**不从 cwd 读取**；`SKYPORT_POLICY_PATH` 可显式指定）；`autoExecLowRisk` 默认关闭，开启后 doctor/config 会警示，且组合命令与命令替换永远不享受自动执行。报错默认只出中文人话（`SKYPORT_VERBOSE_ERRORS=true` 显示底层技术细节）。
 

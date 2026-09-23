@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { closeDb } from '../adapters/db';
 import { resetConfigCache } from '../config/config';
 import { isSkyportError } from '../errors/errors';
+import type { UserRole } from './users';
 import {
   can, createUser, issueWebSession, listUsers, ROLE_CAPABILITIES,
-  revokeWebSession, verifyLogin, verifyWebSession, USER_ROLES,
+  revokeWebSession, verifyLogin, verifyWebSession,
 } from './users';
 
 let tempDir: string;
@@ -35,9 +36,13 @@ describe('用户与角色四分（spec/webui）', () => {
     expect(can('approver', 'users:manage')).toBe(false);
     expect(can('admin', 'users:manage')).toBe(true);
     // 集合逐级包含（严格递增的机器证明）
-    for (const role of USER_ROLES.slice(1)) {
-      const prev = ROLE_CAPABILITIES[USER_ROLES[USER_ROLES.indexOf(role) - 1] as never];
-      for (const cap of prev) expect(ROLE_CAPABILITIES[role]).toContain(cap);
+    const ladder: readonly [UserRole, UserRole][] = [
+      ['viewer', 'operator'],
+      ['operator', 'approver'],
+      ['approver', 'admin'],
+    ];
+    for (const [prevRole, currRole] of ladder) {
+      for (const cap of ROLE_CAPABILITIES[prevRole]) expect(ROLE_CAPABILITIES[currRole]).toContain(cap);
     }
   });
 

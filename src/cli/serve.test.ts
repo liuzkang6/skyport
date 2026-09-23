@@ -31,10 +31,10 @@ afterEach(async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
-async function fetchApi(path: string, token?: string): Promise<{ status: number; body: Record<string, unknown> }> {
+async function fetchApi(path: string, token?: string, init: RequestInit = {}): Promise<{ status: number; body: Record<string, unknown> }> {
   const headers: Record<string, string> = {};
   if (token !== undefined) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`http://127.0.0.1:${serve!.port}${path}`, { headers });
+  const res = await fetch(`http://127.0.0.1:${serve!.port}${path}`, { ...init, headers });
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 }
 
@@ -199,6 +199,7 @@ describe('WebUI 会话与审批（spec/webui）', () => {
       actor: { type: 'human', id: 'e2e-human', name: 'e2e-human' },
       reason: 'webui e2e',
       riskHint: 'high',
+      rollback: 'echo 已回滚（只读 e2e）',
     });
     expect(pending.action.status).toBe('pending');
 
@@ -225,6 +226,7 @@ describe('WebUI 会话与审批（spec/webui）', () => {
       actor: { type: 'human', id: 'e2e-human', name: 'e2e-human' },
       reason: 'reject e2e',
       riskHint: 'high',
+      rollback: 'echo 已回滚（只读 e2e）',
     });
     const reject = await fetchWeb(`/api/v1/actions/${a1.action.id}/reject`, {
       method: 'POST', cookie, body: JSON.stringify({ note: '不需要' }),
@@ -236,6 +238,7 @@ describe('WebUI 会话与审批（spec/webui）', () => {
       command: 'echo double-approve',
       actor: { type: 'human', id: 'e2e-human', name: 'e2e-human' },
       riskHint: 'high',
+      rollback: 'echo 已回滚（只读 e2e）',
     });
     const first = await fetchWeb(`/api/v1/actions/${a2.action.id}/approve`, { method: 'POST', cookie });
     expect(first.status).toBe(200);
@@ -247,7 +250,7 @@ describe('WebUI 会话与审批（spec/webui）', () => {
     const issued = createAgent({ name: 'web-agent', assetPatterns: ['*'], riskCeiling: 'medium', autoExecLow: false });
     const session = loginWithRefreshToken(issueRefreshToken(issued.agent.id));
     serve = await startServe({ port: 0 });
-    const res = await fetchApi('/api/v1/actions/act_x/approve', session.token);
+    const res = await fetchApi('/api/v1/actions/act_x/approve', session.token, { method: 'POST' });
     expect(res.status).toBe(403);
   });
 });

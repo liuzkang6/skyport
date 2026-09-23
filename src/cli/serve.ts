@@ -158,10 +158,19 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       sendJson(res, 400, { error: 'username 与 password 必填', type: 'SKYPORT_USER_INVALID' });
       return;
     }
-    const user = verifyLogin(body.username, body.password);
-    const session = issueWebSession(user);
-    res.setHeader('Set-Cookie', `${WEB_SESSION_COOKIE}=${session.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
-    sendJson(res, 200, { user: { id: user.id, name: user.name, role: user.role } });
+    try {
+      const user = verifyLogin(body.username, body.password);
+      const session = issueWebSession(user);
+      res.setHeader('Set-Cookie', `${WEB_SESSION_COOKIE}=${session.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`);
+      sendJson(res, 200, { user: { id: user.id, name: user.name, role: user.role } });
+    } catch (error) {
+      // 登录失败（凭证不对）= 401；锁定/禁用按各自错误码走全局映射（429/403）
+      if (isSkyportError(error) && error.type === ERROR_CODES.PERMISSION_DENIED) {
+        sendJson(res, 401, { error: error.message, type: error.type });
+        return;
+      }
+      throw error;
+    }
     return;
   }
 
@@ -197,7 +206,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   if (method === 'GET' && path.startsWith('/api/v1/assets/')) {
-    const name = decodeURIComponent(path.split('/')[3] ?? '');
+    const name = decodeURIComponent(path.split('/')[4] ?? '');
     sendJson(res, 200, getAsset(name));
     return;
   }
@@ -211,7 +220,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   if (method === 'GET' && path.startsWith('/api/v1/actions/')) {
-    const id = decodeURIComponent(path.split('/')[3] ?? '');
+    const id = decodeURIComponent(path.split('/')[4] ?? '');
     sendJson(res, 200, getAction(id));
     return;
   }
@@ -219,7 +228,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // 行动审批（approver+；委托行动状态机，serve 不持有状态）
   if (method === 'POST' && path.startsWith('/api/v1/actions/') && path.endsWith('/approve')) {
     const auth = requireCapability(req, 'action:approve');
-    const id = decodeURIComponent(path.split('/')[3] ?? '');
+    const id = decodeURIComponent(path.split('/')[4] ?? '');
     const result = await approveAction(id, auth.actor);
     sendJson(res, 200, result);
     return;
@@ -227,7 +236,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   if (method === 'POST' && path.startsWith('/api/v1/actions/') && path.endsWith('/reject')) {
     const auth = requireCapability(req, 'action:approve');
-    const id = decodeURIComponent(path.split('/')[3] ?? '');
+    const id = decodeURIComponent(path.split('/')[4] ?? '');
     const body = (await readBody(req)) as { note?: unknown };
     const action = rejectAction(id, auth.actor, typeof body.note === 'string' && body.note !== '' ? body.note : undefined);
     sendJson(res, 200, { action });
@@ -273,14 +282,14 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   if (method === 'PATCH' && path.startsWith('/api/v1/alerts/') && path.endsWith('/ack')) {
     requireCapability(req, 'alerts:write');
-    const id = path.split('/')[3] ?? '';
+    const id = decodeURIComponent(path.split('/')[4] ?? '');
     sendJson(res, 200, ackAlert(decodeURIComponent(id)));
     return;
   }
 
   if (method === 'PATCH' && path.startsWith('/api/v1/alerts/') && path.endsWith('/close')) {
     requireCapability(req, 'alerts:write');
-    const id = path.split('/')[3] ?? '';
+    const id = decodeURIComponent(path.split('/')[4] ?? '');
     sendJson(res, 200, closeAlert(decodeURIComponent(id)));
     return;
   }
@@ -293,14 +302,14 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // ── 态势包端点（v0.4 知识层）──
 
   if (method === 'GET' && path.startsWith('/api/v1/context/') && path.endsWith('/summary')) {
-    const assetName = decodeURIComponent(path.split('/')[3] ?? '');
+    const assetName = decodeURIComponent(path.split('/')[4] ?? '');
     const pack = buildContextPack(assetName);
     sendJson(res, 200, summarizeContextPack(pack));
     return;
   }
 
   if (method === 'GET' && path.startsWith('/api/v1/context/')) {
-    const assetName = decodeURIComponent(path.split('/')[3] ?? '');
+    const assetName = decodeURIComponent(path.split('/')[4] ?? '');
     sendJson(res, 200, buildContextPack(assetName));
     return;
   }
