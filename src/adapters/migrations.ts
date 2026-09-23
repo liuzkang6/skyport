@@ -247,5 +247,33 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec('ALTER TABLE actions ADD COLUMN assignee TEXT;');
     },
   },
+  {
+    version: 11,
+    up: (db) => {
+      // WebUI 第一刀：用户与角色四分 + Web 会话（spec/webui）
+      db.exec(`
+        CREATE TABLE users (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          password_salt TEXT NOT NULL,
+          password_hash TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'viewer',
+          status TEXT NOT NULL DEFAULT 'active',
+          failed_attempts INTEGER NOT NULL DEFAULT 0,
+          locked_until TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE web_sessions (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id),
+          token_hash TEXT NOT NULL UNIQUE,
+          issued_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          last_used_at TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 

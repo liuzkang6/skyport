@@ -21,6 +21,7 @@ import { buildAgentCommand } from './commands/agents';
 import { buildActionCommand, buildApprovalCommands } from './commands/actions';
 import { buildAssetCommand, configureListCommand } from './commands/assets';
 import { buildWatchCommand } from './commands/watch';
+import { buildUserCommand } from './commands/users';
 
 /** 退出码约定：0 成功；1 未知错误；2 用法错误；3-9 按错误域（config/exec/fs/network/permission/db/asset） */
 const EXIT_OK = 0;
@@ -170,6 +171,7 @@ function buildProgram(): Command {
   program.addCommand(buildAssetCommand());
   program.addCommand(buildActionCommand());
   program.addCommand(buildAgentCommand());
+  program.addCommand(buildUserCommand());
   buildApprovalCommands(program);
   buildWatchCommand(program);
 

@@ -30,6 +30,8 @@ const configSchema = z.strictObject({
   checkTimeoutMs: z.coerce.number().int().positive().default(5_000),
   /** agent 身份凭证（SKYPORT_API_KEY）：只在需要以 agent 身份调用时设置 */
   apiKey: z.string().min(1).optional(),
+  /** 用户创建口令（SKYPORT_USER_PASSWORD）：仅供 user add 脚本化用，不落任何存储（spec/webui） */
+  userPassword: z.string().min(1).optional(),
   /** pending 行动的出站 webhook（SKYPORT_NOTIFY_WEBHOOK_URL）；未配置则不发送 */
   notifyWebhookUrl: z.string().min(1).optional(),
   /** 风险策略文件显式路径（SKYPORT_POLICY_PATH）；缺省用 ~/.skyport/skyport.policy.json。
@@ -63,6 +65,7 @@ const ENV_KEY_TO_CONFIG_KEY: Readonly<Record<string, string>> = {
   SKYPORT_DB_PATH: 'dbPath',
   SKYPORT_CHECK_TIMEOUT_MS: 'checkTimeoutMs',
   SKYPORT_API_KEY: 'apiKey',
+  SKYPORT_USER_PASSWORD: 'userPassword',
   SKYPORT_NOTIFY_WEBHOOK_URL: 'notifyWebhookUrl',
   SKYPORT_POLICY_PATH: 'policyPath',
   SKYPORT_VERBOSE_ERRORS: 'verboseErrors',

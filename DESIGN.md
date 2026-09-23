@@ -94,6 +94,11 @@ skyport 是 管理型（AI 运维行动与治理工作台） 界面。设计基�
   --color-tooltip-tag: #e6e6e6; --color-tooltip-tag-foreground: #5c5c5c; --color-tag: #e6e6e6;
   --color-usage-chart-1: #0b7fff; --color-usage-chart-2: #1e8a3e; --color-usage-chart-3: #9e77ed;
   --color-usage-chart-4: #e03131; --color-usage-chart-5: #e07b00; --color-usage-chart-6: #0aa7a7;
+  /* 治理色域（spec/webui）：行动状态与风险等级独立色族，从语义色派生但独立命名 */
+  --color-gov-pending: #b45309; --color-gov-approved: #0b7fff; --color-gov-executing: #9e77ed;
+  --color-gov-success: #1e8a3e; --color-gov-failed: #e03131; --color-gov-rejected: #6b7280;
+  --color-gov-cancelled: #9ca3af;
+  --color-gov-risk-low: #1e8a3e; --color-gov-risk-medium: #e07b00; --color-gov-risk-high: #e03131;
 }
 ```
 
@@ -132,6 +137,11 @@ skyport 是 管理型（AI 运维行动与治理工作台） 界面。设计基�
   --color-tooltip-tag: #363636; --color-tooltip-tag-foreground: #adadad; --color-tag: #363636;
   --color-usage-chart-1: #4099ff; --color-usage-chart-2: #46bf72; --color-usage-chart-3: #7b5ce5;
   --color-usage-chart-4: #ff5c5c; --color-usage-chart-5: #ff8a30; --color-usage-chart-6: #42c8c8;
+  /* 治理色域（spec/webui）：与亮色一一对应，暗色取语义色暗色档 */
+  --color-gov-pending: #ff8a30; --color-gov-approved: #4099ff; --color-gov-executing: #7b5ce5;
+  --color-gov-success: #46bf72; --color-gov-failed: #ff5c5c; --color-gov-rejected: #9ca3af;
+  --color-gov-cancelled: #6b7280;
+  --color-gov-risk-low: #46bf72; --color-gov-risk-medium: #ff8a30; --color-gov-risk-high: #ff5c5c;
 }
 ```
 
@@ -142,7 +152,7 @@ skyport 是 管理型（AI 运维行动与治理工作台） 界面。设计基�
 - hover 用 `bg-hover`，选中用 `bg-selected`；主按钮 `bg-primary text-primary-foreground`
 - 文本三级：正文 foreground / 次要 subtle / 弱提示 subtlest；反色文本 foreground-inverse
 - 语义色（success/warning/destructive）只在真实语义状态使用，禁止借用制造视觉强度；Diff 必须用 diff-added/removed，不与 success/destructive 混用
-- **治理状态色域（feature-scoped，功能落地时启用）**：行动状态（pending/approved/executing/success/failed/rejected/cancelled）与风险等级（low/medium/high）建立独立色族 `--color-gov-*`，从语义色派生但独立命名——避免"待审批借用 warning 色"这类语义漂移；与 CLI 现行符号（○ ● ✕ ⟳ ⊘ –）一一对应
+- **治理状态色域（spec/webui，已启用）**：行动状态（pending/approved/executing/success/failed/rejected/cancelled）与风险等级（low/medium/high）使用独立色族 `--color-gov-*`，从语义色派生但独立命名——避免"待审批借用 warning 色"这类语义漂移；与 CLI 现行符号（○ ◐ ⟳ ● ✕ ⊘ –）一一对应。用法：状态文字/符号用 `text-gov-<状态>`，卡片列头徽章与风险徽章配同色边框或低透明底（`bg-gov-<状态>/10`），**颜色+符号+文字三编码**，两主题下均须校验对比度
 - 禁止 raw 一次性色值；禁止 `text-white/60`、`border-white/10` 类临时透明度拼凑
 
 ## 4. 间距 / 圆角 / 阴影 / 尺寸

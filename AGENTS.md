@@ -91,14 +91,16 @@
 
 报告用中文文字说明，禁止贴大段代码。
 
-## 10. UI 与平台边界（Web UI 落地前即生效，v2 实现时随第一版同步细化）
+## 10. UI 与平台边界（Web UI 第一版已落地，随切片同步细化）
 
-- Web UI 属 v2 范围；任何 UI 需求动手前，先更新 DESIGN.md 与本节，再写组件
-- **分层铁律**：UI（组件/页面）只经 API 层（server 模式提供的 HTTP 接口）访问 services；禁止 UI 直接 import services/adapters/executor，禁止 UI 进程直连 SQLite——数据与执行状态的唯一所有者是 SQLite 与行动状态机，UI 只消费投影
+- Web UI 代码在 `webui/`（独立 npm 项目：Vite+React+Tailwind v4+Zustand）；任何 UI 需求动手前，先更新 DESIGN.md 与本节，再写组件
+- **分层铁律**：UI（组件/页面）只经 API 层（serve 的 `/api/v1`）访问 services；禁止 UI 直接 import services/adapters/executor，禁止 UI 进程直连 SQLite——数据与执行状态的唯一所有者是 SQLite 与行动状态机，UI 只消费投影
 - server 模式只做鉴权、API 编排与会话调度，不保存行动执行状态；将来手机/桌面多端复用同一 server 与会话运行时，不为单端另起执行路径
 - 平台差异（桌面/浏览器/移动）经统一平台服务抽象处理（接口注入），不在组件里直接调平台专有 API
 - 全局共享状态统一放 store（Zustand）；跨端广播同步的字段（主题、语言等）必须防回环；UI 局部状态不得被误当作服务端事实
-- 实时链路与恢复链路语义分开：值守/审批类实时推送与断线重连后的状态恢复是两条路径，改 stream/queue/重连时两种语义都要验证
+- 实时链路与恢复链路语义分开：值守/审批类实时推送与断线重连后的状态恢复是两条路径，改 stream/queue/重连时两种语义都要验证（第一刀为 8s 轮询，SSE 属后续切片）
+- 认证双轨：浏览器走 Web 会话 cookie（`skw_`，HttpOnly/SameSite=Strict）；API 消费方走 Bearer（sks_/skp_）；serve 层统一解析，端点鉴权只认角色能力集（viewer⊂operator⊂approver⊂admin）
+- webui 门禁：`cd webui && pnpm verify`（typecheck + test + build）；root `pnpm verify` 不覆盖 webui，两处都要绿才算过门禁；serve 静态托管 `webui/dist/`，dist 不进库（.gitignore）
 
 ## 附：文件地图
 
@@ -117,5 +119,6 @@ skyport/
 │   ├── adapters/        ← 文件/网络等 I/O 适配器
 │   ├── services/        ← 业务服务
 │   └── cli/             ← CLI 入口（唯一 catch 处）
+├── webui/               ← WebUI（独立 npm 项目，只经 /api/v1 访问；见 §10）
 └── docs/                ← 其他文档
 ```
