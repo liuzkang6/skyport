@@ -7,6 +7,8 @@ import { resetConfigCache } from '../config/config';
 import { createAgent } from '../services/agents';
 import { issueRefreshToken, loginWithRefreshToken } from '../services/credentials';
 import { addAsset } from '../services/assets';
+import { createAction } from '../services/actions';
+import { createUser } from '../services/users';
 import { startServe, type ServeResult } from './serve';
 
 let tempDir: string;
@@ -88,5 +90,164 @@ describe('REST API v1（serve）', () => {
     serve = await startServe({ port: 0 });
     const res = await fetchApi('/api/v1/nonexistent');
     expect(res.status).toBe(403); // 先被认证拦截
+  });
+});
+
+// ── WebUI 第一刀（spec/webui）：登录会话 + 角色门禁 + 就地审批 ──
+
+interface CookieResponse {
+  status: number;
+  body: Record<string, unknown>;
+  setCookie: string | undefined;
+}
+
+async function fetchWeb(path: string, init: RequestInit & { cookie?: string } = {}): Promise<CookieResponse> {
+  const headers: Record<string, string> = {};
+  if (init.cookie !== undefined) headers.Cookie = init.cookie;
+  if (init.body !== undefined) headers['Content-Type'] = 'application/json';
+  const res = await fetch(`http://127.0.0.1:${serve!.port}${path}`, { ...init, headers });
+  return {
+    status: res.status,
+    body: (await res.json().catch(() => ({}))) as Record<string, unknown>,
+    setCookie: res.headers.get('set-cookie') ?? undefined,
+  };
+}
+
+function cookieOf(res: CookieResponse): string {
+  return (res.setCookie ?? '').split(';')[0] ?? '';
+}
+
+async function loginWeb(username: string, password: string): Promise<CookieResponse> {
+  return fetchWeb('/api/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+describe('WebUI 会话与审批（spec/webui）', () => {
+  it('登录 → Set-Cookie(skw_, HttpOnly, SameSite=Strict) → me 返回角色', async () => {
+    createUser('web-admin', 'password8', 'admin');
+    serve = await startServe({ port: 0 });
+
+    const login = await loginWeb('web-admin', 'password8');
+    expect(login.status).toBe(200);
+    expect(login.body.user).toMatchObject({ name: 'web-admin', role: 'admin' });
+    expect(login.setCookie).toContain('skyport_session=skw_');
+    expect(login.setCookie).toContain('HttpOnly');
+    expect(login.setCookie).toContain('SameSite=Strict');
+
+    const me = await fetchWeb('/api/v1/auth/me', { cookie: cookieOf(login) });
+    expect(me.status).toBe(200);
+    expect(me.body.user).toMatchObject({ name: 'web-admin' });
+  });
+
+  it('登录失败统一 401 文案；无凭证 me → 403；登出后 cookie 失效', async () => {
+    createUser('web-ops', 'password8', 'operator');
+    serve = await startServe({ port: 0 });
+
+    const bad = await loginWeb('web-ops', 'wrong-password');
+    expect(bad.status).toBe(401);
+    expect(bad.body.error).toBe('用户名或密码错误');
+
+    const ghost = await loginWeb('no-such-user', 'whatever-1');
+    expect(ghost.status).toBe(401);
+    expect(ghost.body.error).toBe('用户名或密码错误'); // 与密码错误同文案（防枚举）
+
+    const anonymous = await fetchWeb('/api/v1/auth/me');
+    expect(anonymous.status).toBe(403);
+
+    const login = await loginWeb('web-ops', 'password8');
+    const cookie = cookieOf(login);
+    const logout = await fetchWeb('/api/v1/auth/logout', { method: 'POST', cookie });
+    expect(logout.status).toBe(200);
+    const after = await fetchWeb('/api/v1/auth/me', { cookie });
+    expect(after.status).toBe(403);
+  });
+
+  it('连续失败 5 次 → 429 + Retry-After（锁定中正确密码也拒绝）', async () => {
+    createUser('web-victim', 'password8', 'viewer');
+    serve = await startServe({ port: 0 });
+    for (let i = 0; i < 5; i += 1) {
+      const fail = await loginWeb('web-victim', 'wrong-password');
+      expect(fail.status).toBe(401);
+    }
+    const locked = await loginWeb('web-victim', 'password8');
+    expect(locked.status).toBe(429);
+    expect(locked.body.type).toBe('SKYPORT_USER_LOCKED');
+  });
+
+  it('用户清单：admin 可读，approver → 403', async () => {
+    createUser('web-a2', 'password8', 'admin');
+    createUser('web-p2', 'password8', 'approver');
+    serve = await startServe({ port: 0 });
+    const adminCookie = cookieOf(await loginWeb('web-a2', 'password8'));
+    const approverCookie = cookieOf(await loginWeb('web-p2', 'password8'));
+
+    const ok = await fetchWeb('/api/v1/users', { cookie: adminCookie });
+    expect(ok.status).toBe(200);
+    expect(JSON.stringify(ok.body)).not.toContain('password_hash');
+
+    const denied = await fetchWeb('/api/v1/users', { cookie: approverCookie });
+    expect(denied.status).toBe(403);
+  });
+
+  it('就地审批：approver 经 cookie 批准 pending 行动（执行 echo），viewer → 403', async () => {
+    createUser('web-approver', 'password8', 'approver');
+    createUser('web-viewer', 'password8', 'viewer');
+    const pending = await createAction({
+      command: 'echo webui-e2e-ok',
+      actor: { type: 'human', id: 'e2e-human', name: 'e2e-human' },
+      reason: 'webui e2e',
+      riskHint: 'high',
+    });
+    expect(pending.action.status).toBe('pending');
+
+    serve = await startServe({ port: 0 });
+    const viewerCookie = cookieOf(await loginWeb('web-viewer', 'password8'));
+    const approverCookie = cookieOf(await loginWeb('web-approver', 'password8'));
+
+    const denied = await fetchWeb(`/api/v1/actions/${pending.action.id}/approve`, { method: 'POST', cookie: viewerCookie });
+    expect(denied.status).toBe(403);
+
+    const ok = await fetchWeb(`/api/v1/actions/${pending.action.id}/approve`, { method: 'POST', cookie: approverCookie });
+    expect(ok.status).toBe(200);
+    const action = ok.body.action as { status: string } | undefined;
+    expect(action?.status === 'success' || action?.status === 'executing' || action?.status === 'approved').toBe(true);
+  });
+
+  it('否决：approver 带 note；重复审批终态 → 409 状态机拒绝', async () => {
+    createUser('web-approver2', 'password8', 'approver');
+    serve = await startServe({ port: 0 });
+    const cookie = cookieOf(await loginWeb('web-approver2', 'password8'));
+
+    const a1 = await createAction({
+      command: 'echo reject-me',
+      actor: { type: 'human', id: 'e2e-human', name: 'e2e-human' },
+      reason: 'reject e2e',
+      riskHint: 'high',
+    });
+    const reject = await fetchWeb(`/api/v1/actions/${a1.action.id}/reject`, {
+      method: 'POST', cookie, body: JSON.stringify({ note: '不需要' }),
+    });
+    expect(reject.status).toBe(200);
+    expect((reject.body.action as { status: string }).status).toBe('rejected');
+
+    const a2 = await createAction({
+      command: 'echo double-approve',
+      actor: { type: 'human', id: 'e2e-human', name: 'e2e-human' },
+      riskHint: 'high',
+    });
+    const first = await fetchWeb(`/api/v1/actions/${a2.action.id}/approve`, { method: 'POST', cookie });
+    expect(first.status).toBe(200);
+    const second = await fetchWeb(`/api/v1/actions/${a2.action.id}/approve`, { method: 'POST', cookie });
+    expect([409, 500]).toContain(second.status); // 状态机拒绝（非法迁移）
+  });
+
+  it('Bearer（agent）调审批端点 → 403（API 令牌无角色）', async () => {
+    const issued = createAgent({ name: 'web-agent', assetPatterns: ['*'], riskCeiling: 'medium', autoExecLow: false });
+    const session = loginWithRefreshToken(issueRefreshToken(issued.agent.id));
+    serve = await startServe({ port: 0 });
+    const res = await fetchApi('/api/v1/actions/act_x/approve', session.token);
+    expect(res.status).toBe(403);
   });
 });

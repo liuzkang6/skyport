@@ -1,0 +1,29 @@
+{
+  "name": "skyport-webui",
+  "version": "0.7.0",
+  "description": "skyport WebUI —— 治理看板（spec/webui；只经 /api/v1 访问，见根 AGENTS.md §10）",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "vite build",
+    "verify": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zustand": "^5.0.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.11",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^5.0.0",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.4"
+  }
+}

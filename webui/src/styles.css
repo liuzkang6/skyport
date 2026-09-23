@@ -1,0 +1,106 @@
+/* skyport WebUI 设计 token（DESIGN.md §2/§3 —— 数值以 DESIGN.md 为唯一权威，改值先改文档） */
+@import "tailwindcss";
+
+/* @theme inline：工具类直引用运行时变量，.theme-light/.theme-dark 切换即时生效 */
+@theme inline {
+  --text-ui-xl: calc(var(--ui-font-size) + 4px);
+  --text-ui-lg: calc(var(--ui-font-size) + 2px);
+  --text-ui-base: var(--ui-font-size);
+  --text-ui-caption: calc(var(--ui-font-size) - 1px);
+  --text-ui-sm: calc(var(--ui-font-size) - 2px);
+  --text-ui-xs: calc(var(--ui-font-size) - 4px);
+  --text-ui-2xs: calc(var(--ui-font-size) - 5px);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", "Microsoft YaHei UI", "Microsoft YaHei",
+    "PingFang SC", "Noto Sans CJK SC", monospace;
+
+  --color-background: var(--c-background);
+  --color-background-alt: var(--c-background-alt);
+  --color-header: var(--c-header);
+  --color-sidebar: var(--c-sidebar);
+  --color-panel: var(--c-panel);
+  --color-surface: var(--c-surface);
+  --color-surface-hover: var(--c-surface-hover);
+  --color-card: var(--c-card);
+  --color-card-border: var(--c-card-border);
+  --color-border: var(--c-border);
+  --color-border-hover: var(--c-border-hover);
+  --color-input: var(--c-input);
+  --color-input-border: var(--c-input-border);
+  --color-hover: var(--c-hover);
+  --color-selected: var(--c-selected);
+  --color-primary: var(--c-primary);
+  --color-primary-foreground: var(--c-primary-foreground);
+  --color-foreground: var(--c-foreground);
+  --color-foreground-subtle: var(--c-foreground-subtle);
+  --color-foreground-subtlest: var(--c-foreground-subtlest);
+  --color-destructive: var(--c-destructive);
+  --color-success: var(--c-success);
+  --color-warning: var(--c-warning);
+
+  /* 治理色域（DESIGN.md §3.3）：状态/风险独立色族，颜色+符号+文字三编码 */
+  --color-gov-pending: var(--c-gov-pending);
+  --color-gov-approved: var(--c-gov-approved);
+  --color-gov-executing: var(--c-gov-executing);
+  --color-gov-success: var(--c-gov-success);
+  --color-gov-failed: var(--c-gov-failed);
+  --color-gov-rejected: var(--c-gov-rejected);
+  --color-gov-cancelled: var(--c-gov-cancelled);
+  --color-gov-risk-low: var(--c-gov-risk-low);
+  --color-gov-risk-medium: var(--c-gov-risk-medium);
+  --color-gov-risk-high: var(--c-gov-risk-high);
+}
+
+:root {
+  --ui-font-size: 14px;
+}
+
+/* 亮色主题（默认，DESIGN.md §3.1） */
+.theme-light {
+  --c-primary: #000000; --c-primary-foreground: #ffffff;
+  --c-background: #f8f8f8;
+  --c-background-alt: color-mix(in oklab, var(--c-background) 70%, transparent);
+  --c-header: #ffffff; --c-panel: #ffffff; --c-sidebar: #f0f0f0;
+  --c-surface: rgba(13, 13, 13, 0.03); --c-surface-hover: rgba(13, 13, 13, 0.05);
+  --c-card: #ffffff;
+  --c-card-border: rgba(13, 13, 13, 0.1);
+  --c-border: rgba(13, 13, 13, 0.1); --c-border-hover: rgba(13, 13, 13, 0.15);
+  --c-input: #ffffff; --c-input-border: var(--c-border);
+  --c-hover: rgba(13, 13, 13, 0.05); --c-selected: rgba(13, 13, 13, 0.05);
+  --c-foreground: #262626;
+  --c-foreground-subtle: rgba(38, 38, 38, 0.6);
+  --c-foreground-subtlest: rgba(38, 38, 38, 0.4);
+  --c-destructive: #e03131; --c-success: #1e8a3e; --c-warning: #e07b00;
+  --c-gov-pending: #b45309; --c-gov-approved: #0b7fff; --c-gov-executing: #9e77ed;
+  --c-gov-success: #1e8a3e; --c-gov-failed: #e03131; --c-gov-rejected: #6b7280;
+  --c-gov-cancelled: #9ca3af;
+  --c-gov-risk-low: #1e8a3e; --c-gov-risk-medium: #e07b00; --c-gov-risk-high: #e03131;
+}
+
+/* 暗色主题（DESIGN.md §3.2） */
+.theme-dark {
+  --c-primary: #ffffff; --c-primary-foreground: #000000;
+  --c-background: #161616;
+  --c-background-alt: color-mix(in oklab, #2b2b2b 60%, transparent);
+  --c-header: #202020; --c-panel: #202020; --c-sidebar: #161616;
+  --c-surface: rgba(255, 255, 255, 0.05); --c-surface-hover: rgba(255, 255, 255, 0.1);
+  --c-card: #2b2b2b;
+  --c-card-border: rgba(255, 255, 255, 0.1);
+  --c-border: rgba(255, 255, 255, 0.1); --c-border-hover: rgba(255, 255, 255, 0.15);
+  --c-input: #2b2b2b; --c-input-border: var(--c-border);
+  --c-hover: rgba(255, 255, 255, 0.05); --c-selected: rgba(255, 255, 255, 0.1);
+  --c-foreground: #d1d5db;
+  --c-foreground-subtle: rgba(209, 213, 219, 0.6);
+  --c-foreground-subtlest: rgba(209, 213, 219, 0.3);
+  --c-destructive: #ff5c5c; --c-success: #46bf72; --c-warning: #ff8a30;
+  --c-gov-pending: #ff8a30; --c-gov-approved: #4099ff; --c-gov-executing: #7b5ce5;
+  --c-gov-success: #46bf72; --c-gov-failed: #ff5c5c; --c-gov-rejected: #9ca3af;
+  --c-gov-cancelled: #6b7280;
+  --c-gov-risk-low: #46bf72; --c-gov-risk-medium: #ff8a30; --c-gov-risk-high: #ff5c5c;
+}
+
+html, body {
+  height: 100%;
+  background: var(--c-background);
+  color: var(--c-foreground);
+}
