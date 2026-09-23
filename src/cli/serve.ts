@@ -27,12 +27,17 @@ import {
 import type { ActorRef } from '../services/agents';
 import { reconcileZombies } from '../services/reconciliation';
 import { runPatrollerSweep } from '../services/patroller';
+import { pruneMetricPoints, recomputeAllBaselines } from '../services/baseline';
 import { serveStatic } from './static';
 
 /** 僵尸对账周期：网关常驻期间每 5 分钟自愈一次 */
 const RECONCILE_INTERVAL_MS = 5 * 60_000;
 /** 巡查周期：AI 座位定时巡逻（spec/llm-seat） */
 const PATROLLER_INTERVAL_MS = 15 * 60_000;
+/** 基线重算周期（spec/baseline：数据积累→每小时学一次"什么是正常"） */
+const BASELINE_INTERVAL_MS = 60 * 60_000;
+/** 指标保留清理周期 */
+const PRUNE_INTERVAL_MS = 24 * 60 * 60_000;
 /** 最近一次巡查结果（内存态：serve 单进程，重启后由定时/手动巡查重建） */
 let lastPatrollerSweep: unknown;
 
@@ -117,6 +122,28 @@ export function startServe(options: ServeOptions = {}): Promise<ServeResult> {
       }
     }, RECONCILE_INTERVAL_MS);
     server.on('close', () => clearInterval(zombieTimer));
+
+    // 数据积累闭环（spec/baseline）：每小时重算全量基线（样本不足自动跳过），供巡查员异常检测
+    const baselineTimer = setInterval(() => {
+      try {
+        const report = recomputeAllBaselines();
+        if (report.computed > 0) rootLogger.info('基线重算完成', report);
+      } catch (error) {
+        rootLogger.warn('基线重算失败', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }, BASELINE_INTERVAL_MS);
+    server.on('close', () => clearInterval(baselineTimer));
+
+    // 指标保留策略：每天清理 30 天前的原始点（基线聚合值已固化，不受影响）
+    const pruneTimer = setInterval(() => {
+      try {
+        const pruned = pruneMetricPoints(30);
+        if (pruned > 0) rootLogger.info('过期指标点已清理', { pruned, retentionDays: 30 });
+      } catch (error) {
+        rootLogger.warn('指标清理失败', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }, PRUNE_INTERVAL_MS);
+    server.on('close', () => clearInterval(pruneTimer));
 
     // AI 巡查座位（spec/llm-seat）：定时巡逻；未配置模型时静默跳过（配置后自动生效）
     const patrollerTimer = setInterval(() => {

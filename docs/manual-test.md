@@ -215,6 +215,7 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7100/api/v1/alerts/stats
 - [x] 告警闭环（调度器自动触发剧本：事件/severity 匹配 + 5 分钟冷却 + playbook_runs 留痕）
 - [x] 交接班落库（handovers 表 + GET /handover/latest + 治理页预载）
 - [x] AI 座位：模型配置中心（v14 + key 入保险箱 + CRUD）+ LLM 客户端（usage 记账 + 注入防御）+ 巡查员（15 分钟定时巡逻 + 白名单约束）
+- [x] 生产数据积累闭环：指标（CPU/内存/磁盘/日志错误率 30s 采集）→ 基线（每小时重算 p50/p95）→ 异常检测；30 天保留自动清理
 
 ## 僵尸对账（v0.3.x 网关完工线收尾）
 
@@ -330,3 +331,25 @@ curl -X POST http://127.0.0.1:7100/api/v1/actions/<id>/approve -H "Cookie: ..."
 Web UI：操作台顶部"AI 巡查员"卡片（最近巡查结论/异常数/提案状态 + 立即巡查按钮）。
 安全：巡查员是系统 agent（低危上限）；LLM 输出过注入守卫标记 + 决策 JSON 严格校验 +
 只读命令白名单（危险头/片段拒绝）；单次巡查提案上限 3 条。
+
+## 生产数据积累（spec/baseline：攒 → 学 → 检测）
+
+数据流：Go agent 每 30s 心跳带指标（cpu_usage / mem_usage / disk_usage / log_error_rate_5m）
+→ metric_points 入库 → serve 每小时重算基线（p50/p95，样本 ≥10 才算）→ 巡查员巡查时
+按"最新值 > p95×1.2"判异常。原始点保留 30 天（每天自动清理），基线聚合值永久。
+
+```bash
+# 手动重算 + 查看（serve 常驻时每小时自动）
+skyport baseline compute        # {"computed":9,"skipped":3}
+skyport baseline show t1        # 各指标 p50/p95/样本数
+
+# 指标在攒的证据
+sqlite3 ~/.skyport/skyport.db "SELECT a.name, m.metric, COUNT(*) FROM metric_points m JOIN assets a ON a.id=m.asset_id GROUP BY 1,2"
+
+# 日志错误率：agent 经 journalctl 统计近 5 分钟 err 级条数（log_error_rate_5m），
+# 正常机器≈0；制造日志风暴可验证异常检测：
+logger -p user.err "test error $(date +%s)"   # 在目标机器发一条 err 日志，等下个心跳+巡查
+```
+
+部署新机器：安装 agent（v0.4+）→ asset add 登记（名字=hostname）→ 指标自动开始积累，
+样本攒够 10 个（约 5 分钟）基线自动建立。

@@ -27,6 +27,28 @@ export function recordMetricPoint(assetId: string, metric: string, value: number
     .run(assetId, metric, value, new Date().toISOString());
 }
 
+/** 全量基线重算：遍历所有资产×指标（serve 每小时调度 + CLI 手动；样本不足自动跳过） */
+export function recomputeAllBaselines(): { computed: number; skipped: number } {
+  const pairs = getDb()
+    .prepare('SELECT DISTINCT asset_id, metric FROM metric_points')
+    .all() as { asset_id: string; metric: string }[];
+  let computed = 0;
+  let skipped = 0;
+  for (const pair of pairs) {
+    const result = computeBaseline(pair.asset_id, pair.metric);
+    if (result === undefined) skipped += 1;
+    else computed += 1;
+  }
+  return { computed, skipped };
+}
+
+/** 指标数据保留：删除 cutoff 之前的原始点（基线已固化聚合值，原始点过期可清） */
+export function pruneMetricPoints(retentionDays: number): number {
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 3_600_000).toISOString();
+  const result = getDb().prepare('DELETE FROM metric_points WHERE timestamp < ?').run(cutoff);
+  return result.changes;
+}
+
 /** 计算某资产某指标的基线（p50/p95） */
 export function computeBaseline(assetId: string, metric: string): Baseline | undefined {
   const rows = getDb()
@@ -58,10 +80,27 @@ export function isAnomalous(assetId: string, metric: string, value: number): { a
 }
 
 /** 获取资产全部基线 */
+interface BaselineRow {
+  asset_id: string;
+  metric: string;
+  p50: number;
+  p95: number;
+  sample_count: number;
+  computed_at: string;
+}
+
 export function getBaselines(assetId: string): Baseline[] {
-  return getDb()
+  const rows = getDb()
     .prepare('SELECT asset_id, metric, p50, p95, sample_count, computed_at FROM baselines WHERE asset_id = ?')
-    .all(assetId) as Baseline[];
+    .all(assetId) as BaselineRow[];
+  return rows.map((row) => ({
+    assetId: row.asset_id,
+    metric: row.metric,
+    p50: row.p50,
+    p95: row.p95,
+    sampleCount: row.sample_count,
+    computedAt: row.computed_at,
+  }));
 }
 
 function percentile(sorted: number[], p: number): number {

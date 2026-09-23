@@ -15,6 +15,8 @@ import { isSkyportError, type SkyportError } from '../errors/errors';
 import { formatLogEntry, rootLogger, type LogSink } from '../logger/logger';
 import { runDoctor } from '../services/doctor';
 import { reconcileZombies } from '../services/reconciliation';
+import { getBaselines, recomputeAllBaselines } from '../services/baseline';
+import { getAsset } from '../services/assets';
 import { defaultPolicyPath, loadPolicy } from '../services/risk';
 import { backupDatabase } from '../services/backup';
 import { backfillAuditChain, verifyAuditChain } from '../services/audit-chain';
@@ -246,6 +248,36 @@ function buildProgram(): Command {
       const threshold = Number.isFinite(options.threshold) && options.threshold !== undefined && options.threshold > 0 ? options.threshold : undefined;
       const report = reconcileZombies(threshold);
       process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    });
+
+  const baselineCmd = program
+    .command('baseline')
+    .description('基线管理：重算全量基线 / 查看资产基线（serve 常驻时每小时自动重算）');
+
+  baselineCmd
+    .command('compute')
+    .description('重算全部资产的基线（p50/p95，样本 <10 的指标跳过）')
+    .action(() => {
+      getDb();
+      const report = recomputeAllBaselines();
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    });
+
+  baselineCmd
+    .command('show <asset>')
+    .description('查看某资产的基线')
+    .action((asset: string) => {
+      getDb();
+      const target = getAsset(asset);
+      const baselines = getBaselines(target.id);
+      if (baselines.length === 0) {
+        process.stdout.write(`资产 ${asset} 暂无基线（数据积累中，样本 ≥10 后可计算）\n`);
+        return;
+      }
+      process.stdout.write(`资产 ${asset} 基线（${baselines.length} 项，computed ${baselines[0]?.computedAt.slice(0, 16)}）\n`);
+      for (const b of baselines) {
+        process.stdout.write(`  ${b.metric.padEnd(20)} p50=${b.p50.toFixed(1).padStart(7)} p95=${b.p95.toFixed(1).padStart(7)} n=${b.sampleCount}\n`);
+      }
     });
 
   program
