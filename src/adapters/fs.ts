@@ -129,6 +129,14 @@ export function writeBinarySync(path: string, data: Buffer): void {
   }
 }
 
+export function readFileUtf8Sync(path: string): string {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (error) {
+    throw normalizeFsError(path, 'read', error);
+  }
+}
+
 export function fileSize(path: string): number {
   try {
     return statSync(path).size;
