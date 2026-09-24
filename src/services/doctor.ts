@@ -9,6 +9,7 @@ import { ERROR_CODES, isSkyportError } from '../errors/errors';
 import { execute } from '../executor/executor';
 import { defaultPolicyPath, loadPolicy } from './risk';
 import { ZOMBIE_THRESHOLD_MINUTES } from './reconciliation';
+import { getSecret } from './vault';
 
 export interface DoctorCheck {
   readonly name: string;
@@ -29,7 +30,20 @@ export async function runDoctor(): Promise<DoctorReport> {
   checks.push(checkDatabase());
   checks.push(checkPolicy());
   checks.push(checkZombies());
+  checks.push(checkVaultIntegrity());
   return { ok: checks.every((check) => check.ok), checks };
+}
+
+/** 保险箱完整性：试解第一条 secret（密文与主密钥不匹配时预警——vault.key 重生成会致旧密文报废） */
+function checkVaultIntegrity(): DoctorCheck {
+  try {
+    const row = getDb().prepare('SELECT name FROM secrets LIMIT 1').get() as { name: string } | undefined;
+    if (row === undefined) return { name: 'vault', ok: true, detail: '保险箱为空（无 secret）' };
+    getSecret(row.name);
+    return { name: 'vault', ok: true, detail: `保险箱解密正常（抽查 ${row.name}）` };
+  } catch (error) {
+    return { name: 'vault', ok: false, detail: `保险箱解密异常：${error instanceof Error ? error.message : String(error)}` };
+  }
 }
 
 /** 僵尸可见性（v0.3.x 僵尸对账）：doctor 只诊断不修复，发现即提示跑 reconcile */

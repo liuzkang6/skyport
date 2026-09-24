@@ -65,8 +65,13 @@ function decrypt(encrypted: string, iv: string, authTag: string): string {
   const key = getOrCreateMasterKey();
   const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
   decipher.setAuthTag(Buffer.from(authTag, 'base64'));
-  const decrypted = Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64')), decipher.final()]);
-  return decrypted.toString('utf8');
+  try {
+    const decrypted = Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64')), decipher.final()]);
+    return decrypted.toString('utf8');
+  } catch (error) {
+    // GCM 校验失败 = 密文与当前主密钥不匹配（vault.key 曾被重新生成或更换）
+    throw createError(ERROR_CODES.CONFIG_INVALID, 'secret 解密失败：密文与当前保险箱主密钥不匹配（vault.key 可能被重新生成）。恢复方法：用明文重新写入该 secret；诊断：skyport doctor 查看 vault 完整性', { cause: error });
+  }
 }
 
 export function setSecret(name: string, value: string): SecretRecord {
